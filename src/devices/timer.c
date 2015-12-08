@@ -94,9 +94,16 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks ();
    //implementation
    struct thread *cur = thread_current ();
-   cur->wake_up_ticks=start+ticks;
+   cur->wake_up_ticks = start + ticks;
    list_push_back (&waiting_list,&cur->wake_elem);
+   
+   /*disabling interrupts*/
+   enum intr_level old_level;        /*current interrupt status*/
+   ASSERT (!intr_context ());        /*make sure no interrupt is being processed*/
+   old_level = intr_disable ();      /*disable interrupt*/
+   /*block this thread. interrupt must be disabled when calling this function*/ 
    thread_block();
+   intr_set_level(old_level);        /*enable interrupts*/ 
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -248,17 +255,18 @@ real_time_delay (int64_t num, int32_t denom)
   ASSERT (denom % 1000 == 0);
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000));
 }
+
+/*every interrupt tick check if a certain thread has to wake up*/
 void
 check_wake_ups(){
   struct list_elem *e;
   struct thread *t; 
-  for (e = list_begin (&waiting_list); e != list_end (&waiting_list);
-     e = list_next (e))
+  for (e = list_begin (&waiting_list); e != list_end (&waiting_list);e = list_next (e))
   {
     t = list_entry (e, struct thread, wake_elem);
     if(timer_ticks() >= t->wake_up_ticks){
-      thread_unblock(t);
       list_remove (&t->wake_elem);
+      thread_unblock(t);
     }
   }
 

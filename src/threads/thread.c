@@ -209,6 +209,8 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  /*yield to run this thread if it has maximum priority*/
+  thread_yield();
   return tid;
 }
 
@@ -245,9 +247,10 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_insert_ordered(&ready_list,&t->elem,is_greater,NULL);  /*use ordered insertion to take car of queue*/
+  list_insert_ordered(&ready_list,&t->elem,&is_greater,NULL);  /*use ordered insertion to take car of queue*/
   t->status = THREAD_READY;
   intr_set_level (old_level);
+  //yield ?
 }
 
 /* Returns the name of the running thread. */
@@ -316,7 +319,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_insert_ordered(&ready_list,&cur->elem,is_greater,NULL);  /*use ordered insertion to take car of queue*/
+    list_insert_ordered(&ready_list,&cur->elem,&is_greater,NULL);  /*use ordered insertion to take car of queue*/
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -344,18 +347,16 @@ void
 thread_set_priority (int new_priority) 
 {
   struct thread *cur = thread_current ();
-  
-  enum intr_level old_level;        /*current interrupt status*/
-  ASSERT (!intr_context ());        /*make sure no interrupt is being processed*/
-  old_level = intr_disable ();      /*disable interrupt*/
 
+  /*may interrupts be disabled here if needed*/
+  
   if(cur->priority < new_priority){ /*if the thread is lowering its priority*/
     cur->priority = new_priority;   /*change priority*/
     thread_yield();                 /*callout scheduler*/
   }else{
     cur->priority = new_priority;   /*no need to interrupt the thread, it's already running*/
   }
-  intr_set_level(old_level);        /*enable interrupts*/  
+    
 }
 
 /* Returns the current thread's priority. */
@@ -481,7 +482,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
-  list_insert_ordered(&all_list,&t->allelem,is_greater,NULL); /* insert ordered */
+  list_insert_ordered(&all_list,&t->allelem,&is_greater,NULL); /* insert ordered */
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
