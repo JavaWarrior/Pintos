@@ -138,4 +138,8 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+/*user added*/
+bool is_greater (const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux); /* function for ordered insertion (makes bigger come first)*/
 #endif /* threads/thread.h */

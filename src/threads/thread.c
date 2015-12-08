@@ -245,7 +245,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered(&ready_list,&t->elem,is_greater,NULL);  /*use ordered insertion to take car of queue*/
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -316,7 +316,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+    list_insert_ordered(&ready_list,&cur->elem,is_greater,NULL);  /*use ordered insertion to take car of queue*/
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -343,7 +343,19 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  struct thread *cur = thread_current ();
+  
+  enum intr_level old_level;        /*current interrupt status*/
+  ASSERT (!intr_context ());        /*make sure no interrupt is being processed*/
+  old_level = intr_disable ();      /*disable interrupt*/
+
+  if(cur->priority < new_priority){ /*if the thread is lowering its priority*/
+    cur->priority = new_priority;   /*change priority*/
+    thread_yield();                 /*callout scheduler*/
+  }else{
+    cur->priority = new_priority;   /*no need to interrupt the thread, it's already running*/
+  }
+  intr_set_level(old_level);        /*enable interrupts*/  
 }
 
 /* Returns the current thread's priority. */
@@ -469,7 +481,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
-  list_push_back (&all_list, &t->allelem);
+  list_insert_ordered(&all_list,&t->allelem,is_greater,NULL); /* insert ordered */
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -496,7 +508,9 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else
+    /*left as it's because front is always higher priority*/
     return list_entry (list_pop_front (&ready_list), struct thread, elem);
+
 }
 
 /* Completes a thread switch by activating the new thread's page
@@ -580,6 +594,19 @@ allocate_tid (void)
   lock_release (&tid_lock);
 
   return tid;
+}
+
+/*user added*/
+
+/*  function is used in the scheduler priority insertion and deletion
+    this function inverses the insertion mechanism so that higher priority
+    threads is first in the schduler.
+*/
+bool
+is_greater (const struct list_elem *a, const struct list_elem *b, void *aux)
+{
+  struct thread *t_a =  list_entry (a,struct thread, allelem),*t_b = list_entry (b,struct thread, allelem);
+  return (t_a->priority > t_b->priority);
 }
 
 /* Offset of `stack' member within `struct thread'.
