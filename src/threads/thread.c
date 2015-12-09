@@ -349,7 +349,7 @@ thread_set_priority (int new_priority)
 
   /*may interrupts be disabled here if needed*/
   
-  if(cur->priority < new_priority){ /*if the thread is lowering its priority*/
+  if(cur->priority > new_priority){ /*if the thread is lowering its priority*/
     cur->priority = new_priority;   /*change priority*/
     thread_yield();                 /*callout scheduler*/
   }else{
