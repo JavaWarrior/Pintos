@@ -71,6 +71,7 @@ sema_down (struct semaphore *sema)
   while (sema->value == 0) 
     {
       list_insert_ordered (&sema->waiters, &thread_current ()->elem,&is_greater,NULL);
+      /*insert ordered so that threads takes semaphores according to its priorities*/
       thread_block ();
     }
   sema->value--;
@@ -264,6 +265,7 @@ struct semaphore_elem
   {
     struct list_elem elem;              /* List element. */
     struct semaphore semaphore;         /* This semaphore. */
+    struct thread * t;                  /* the locked thread*/
   };
 
 /* Initializes condition variable COND.  A condition variable
@@ -308,7 +310,9 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
   
   sema_init (&waiter.semaphore, 0);
+  waiter.t = thread_current();                     /*make semaphore_elem related to thread to take priority in consideration*/
   list_push_back (&cond->waiters, &waiter.elem);
+
   lock_release (lock);
   sema_down (&waiter.semaphore);
   lock_acquire (lock);
@@ -329,9 +333,12 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
 
-  if (!list_empty (&cond->waiters)) 
+  if (!list_empty (&cond->waiters)){
+    /*sort here to check donations and wake up higher priority thread first*/
+    list_sort(&cond->waiters,&is_greater_sema,NULL); 
     sema_up (&list_entry (list_pop_front (&cond->waiters),
                           struct semaphore_elem, elem)->semaphore);
+  }
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
@@ -364,8 +371,8 @@ donate(struct lock * lk,int cur_priority)
       lk->old_don_priority = t->donated_priority;     /*save other donated priorities*/
       t->num_of_donors++;     /*save this donation*/
     }
-    t->donated_priority = cur_priority;
-    lk->don_priority = cur_priority;
+    t->donated_priority = cur_priority; /*donate priority */
+    lk->don_priority = cur_priority;    /*save that this priority relates to us*/
   }
   nested_donate(t, lk, cur_priority);  /*go to thread that is holding necessary lock*/
 }
@@ -374,45 +381,56 @@ donate(struct lock * lk,int cur_priority)
 void
 nested_donate(struct thread *t, struct lock * lk, int cur_priority)
 {
-  lk = t->pending_lock;
-  if(lk != NULL){
-    t = lk->holder;
+  lk = t->pending_lock;         /*go to the lock stoping us*/
+  if(lk != NULL){               /*if there's one */
+    t = lk->holder;             /*see what thread is controlling it*/
     while(t != NULL){
+        /* donate to this thread if possible*/
       if(t->priority < cur_priority && cur_priority > t->donated_priority){
-        /* if we can make donation, make it*/
-        t->donated_priority = cur_priority;
-        lk->don_priority = cur_priority;
+        t->donated_priority = cur_priority;   /*donate to the thread*/
+        lk->don_priority = cur_priority;      /*change lock saved donation to ensure that this lock made the donation*/
       }else{
         break;
       }
-      lk = t->pending_lock;
-      if(lk == NULL){
-        break;
-      }else{
-        t = lk->holder;
+      lk = t->pending_lock;                   /*go to next level*/
+      if(lk == NULL){                         /*-----\O---------*/
+        break;                                /*------|\--------*/
+      }else{                                  /*------|---------*/
+        t = lk->holder;                       /*-----/-\--------*/
       }
     }
   }
 }
+
 /*return thread priority to its original state*/
 void 
 undo_donate(struct lock *lk)
 {
-  struct thread * t = thread_current();
+  struct thread * t = thread_current(); /*get the thread that took the donation*/
 
   ASSERT(t!=NULL);
 
   if(lk->don_priority == t->donated_priority){
-    /* if the current donation is from this lock*/
+    /* if the current donation is from the current lock released*/
     t->donated_priority = lk->old_don_priority;
+    /* if previous donations was made keep them*/
   }
   if(lk->don_priority != -1){
     t->num_of_donors--;    /*if this thread donated before remove its donation*/
   }
   if(t->num_of_donors <= 0){
     t->donated_priority = t->priority;
+    /*  if the current thread still have donation even after all locks released
+    *   then remove any donations
+    *   (overlaping case)*/
   }
-  lk->don_priority = -1;
-  lk->old_don_priority = -1;
-  thread_yield();
+  lk->don_priority = -1;      /*mark that this lock doesn't have to make anyother donations*/
+  lk->old_don_priority = -1;  
+  thread_yield();             /*yield to check higher priority unlocked threas*/
+}
+bool
+is_greater_sema (const struct list_elem *a, const struct list_elem *b, void *aux)
+{
+  struct thread *t_a =  list_entry (a,struct semaphore_elem, elem)->t,*t_b = list_entry (b,struct semaphore_elem, elem)->t;
+  return (MAX(t_a->donated_priority,t_a->priority) > MAX(t_b->donated_priority,t_b->priority));
 }

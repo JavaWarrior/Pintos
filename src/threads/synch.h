@@ -51,6 +51,11 @@ void donate(struct lock * lk,int cur_priority);
 void undo_donate(struct lock *lk);
 void nested_donate(struct thread *t, struct lock * lk, int cur_priority);
 
+/*for semaphore condition variable comparison*/
+bool is_greater_sema (const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux); /* function for ordered insertion (makes higher priority come first)*/
+
 /* Optimization barrier.
 
    The compiler will not reorder operations across an
