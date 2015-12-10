@@ -87,13 +87,16 @@ struct thread
     enum thread_status status;          /* Thread state. */
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
-    int priority;                       /* Priority. */
+    int priority;                       /* Priority. shall we call it 'original priority'*/
     struct list_elem allelem;           /* List element for all threads list. */
 
     /*busy waiting*/
     struct list_elem wake_elem;
-    int64_t wake_up_ticks;                /* time to sleep in ticks */
-                                       /*variable in the thread structure to detect how many ticks the thread has to sleep*/
+    int64_t wake_up_ticks;               /* time to sleep in ticks. operand passed to thread_sleep()*/
+    
+    /*part2*/
+    int donated_priority;                /*priority that is donated by any higher priority process that wants the lock*/
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
@@ -146,4 +149,5 @@ int thread_get_load_avg (void);
 bool is_greater (const struct list_elem *a,
                              const struct list_elem *b,
                              void *aux); /* function for ordered insertion (makes bigger come first)*/
+void reorder_scheduling(void); 
 #endif /* threads/thread.h */

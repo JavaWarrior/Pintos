@@ -14,7 +14,9 @@
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
-
+#ifndef MAX
+#define MAX(__A,__B) (((__A)>(__B))?(__A):(__B))
+#endif
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
@@ -346,14 +348,20 @@ void
 thread_set_priority (int new_priority) 
 {
   struct thread *cur = thread_current ();
-
+  ASSERT(cur!=NULL);
   /*may interrupts be disabled here if needed*/
   
   if(cur->priority > new_priority){ /*if the thread is lowering its priority*/
+    if(cur->donated_priority == cur->priority){ /*if there's no ongoing donation*/
+      cur->donated_priority = new_priority;
+    }
     cur->priority = new_priority;   /*change priority*/
     thread_yield();                 /*callout scheduler*/
   }else{
     cur->priority = new_priority;   /*no need to interrupt the thread, it's already running*/
+    if(cur->donated_priority < new_priority){ /*if current donation isn't sufficient*/
+      cur->donated_priority = new_priority;
+    }
   }
     
 }
@@ -362,7 +370,7 @@ thread_set_priority (int new_priority)
 int
 thread_get_priority (void) 
 {
-  return thread_current ()->priority;
+  return MAX(thread_current ()->priority,thread_current ()->donated_priority);
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -480,6 +488,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->donated_priority = priority;
   t->magic = THREAD_MAGIC;
   list_push_back(&all_list,&t->allelem); /* insert unordered, no need to make this list ordered */
 }
@@ -505,6 +514,7 @@ alloc_frame (struct thread *t, size_t size)
 static struct thread *
 next_thread_to_run (void) 
 {
+  reorder_scheduling();
   if (list_empty (&ready_list))
     return idle_thread;
   else
@@ -606,8 +616,14 @@ bool
 is_greater (const struct list_elem *a, const struct list_elem *b, void *aux)
 {
   struct thread *t_a =  list_entry (a,struct thread, elem),*t_b = list_entry (b,struct thread, elem);
-  return (t_a->priority > t_b->priority);
+  return (MAX(t_a->donated_priority,t_a->priority) > MAX(t_b->donated_priority,t_b->priority));
 }
+void
+reorder_scheduling(void){
+  /*this function is called mostly after donations to make donations effective*/
+  list_sort(&ready_list,&is_greater,NULL);
+}
+
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */

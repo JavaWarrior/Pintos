@@ -92,18 +92,16 @@ void
 timer_sleep (int64_t ticks)
 {
   int64_t start = timer_ticks ();
-   //implementation
-   struct thread *cur = thread_current ();
-   cur->wake_up_ticks = start + ticks;
-   list_push_back (&waiting_list,&cur->wake_elem);
-   
-   /*disabling interrupts*/
-   enum intr_level old_level;        /*current interrupt status*/
-   ASSERT (!intr_context ());        /*make sure no interrupt is being processed*/
-   old_level = intr_disable ();      /*disable interrupt*/
-   /*block this thread. interrupt must be disabled when calling this function*/ 
-   thread_block();
-   intr_set_level(old_level);        /*enable interrupts*/ 
+  struct thread *cur = thread_current ();
+  cur->wake_up_ticks = start + ticks;
+  list_push_back (&waiting_list,&cur->wake_elem);
+  /*disabling interrupts*/
+  enum intr_level old_level;        /*current interrupt status*/
+  ASSERT (!intr_context ());        /*make sure no interrupt is being processed*/
+  old_level = intr_disable ();      /*disable interrupt*/
+  /*block this thread. interrupt must be disabled when calling this function*/ 
+  thread_block();
+  intr_set_level(old_level);        /*enable interrupts*/ 
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -258,16 +256,18 @@ real_time_delay (int64_t num, int32_t denom)
 
 /*every interrupt tick check if a certain thread has to wake up*/
 void
-check_wake_ups(){
-  struct list_elem *e;
+check_wake_ups(void){
+  struct list_elem *e = list_begin(&waiting_list);
   struct thread *t; 
-  for (e = list_begin (&waiting_list); e != list_end (&waiting_list);e = list_next (e))
+  while (e != list_end (&waiting_list))
   {
     t = list_entry (e, struct thread, wake_elem);
     if(timer_ticks() >= t->wake_up_ticks){
-      list_remove (&t->wake_elem);
+      e = list_remove (&t->wake_elem); 
       thread_unblock(t);
+      continue; /*now that e is already pointing to the next element no need to advance it*/
     }
+    e = list_next (e);
   }
 
 }

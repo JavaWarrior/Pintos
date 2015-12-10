@@ -31,7 +31,9 @@
 #include <string.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
-
+#ifndef MAX
+#define MAX(__A,__B) (((__A)>(__B))?(__A):(__B))
+#endif
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -68,7 +70,7 @@ sema_down (struct semaphore *sema)
   old_level = intr_disable ();
   while (sema->value == 0) 
     {
-      list_push_back (&sema->waiters, &thread_current ()->elem);
+      list_insert_ordered (&sema->waiters, &thread_current ()->elem,&is_greater,NULL);
       thread_block ();
     }
   sema->value--;
@@ -195,8 +197,11 @@ lock_acquire (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
-
-  sema_down (&lock->semaphore);
+  if(lock->semaphore.value <= 0){
+    /*if another thread is holding the lock*/
+    donate(lock->holder, MAX(thread_current()->priority,thread_current()->donated_priority));
+  }
+  sema_down (&lock->semaphore);   /*take the lock*/
   lock->holder = thread_current ();
 }
 
@@ -233,6 +238,8 @@ lock_release (struct lock *lock)
 
   lock->holder = NULL;
   sema_up (&lock->semaphore);
+  /*after unblocking we need to decrease our priority again*/
+  undo_donate(thread_current());
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -335,4 +342,15 @@ cond_broadcast (struct condition *cond, struct lock *lock)
 
   while (!list_empty (&cond->waiters))
     cond_signal (cond, lock);
+}
+void donate(struct thread * t,int cur_priority){
+  ASSERT(t!=NULL);
+  if(t->priority < cur_priority && cur_priority > t->donated_priority){
+    /* if we can make donation, make it*/
+    t->donated_priority = cur_priority;
+  }
+}
+void undo_donate(struct thread *t){
+  t->donated_priority = t->priority;
+  thread_yield();
 }
