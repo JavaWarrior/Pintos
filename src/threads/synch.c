@@ -181,6 +181,8 @@ lock_init (struct lock *lock)
 
   lock->holder = NULL;
   sema_init (&lock->semaphore, 1);
+  lock->don_priority = -1;
+  lock->old_don_priority=-1;
 }
 
 /* Acquires LOCK, sleeping until it becomes available if
@@ -199,7 +201,7 @@ lock_acquire (struct lock *lock)
   ASSERT (!lock_held_by_current_thread (lock));
   if(lock->semaphore.value <= 0){
     /*if another thread is holding the lock*/
-    donate(lock->holder, MAX(thread_current()->priority,thread_current()->donated_priority));
+    donate(lock, MAX(thread_current()->priority,thread_current()->donated_priority));
   }
   sema_down (&lock->semaphore);   /*take the lock*/
   lock->holder = thread_current ();
@@ -239,7 +241,7 @@ lock_release (struct lock *lock)
   lock->holder = NULL;
   sema_up (&lock->semaphore);
   /*after unblocking we need to decrease our priority again*/
-  undo_donate(thread_current());
+  undo_donate(lock);
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -343,14 +345,45 @@ cond_broadcast (struct condition *cond, struct lock *lock)
   while (!list_empty (&cond->waiters))
     cond_signal (cond, lock);
 }
-void donate(struct thread * t,int cur_priority){
-  ASSERT(t!=NULL);
+/*make donation if this thread needs donation to release the lock*/
+void 
+donate(struct lock * lk,int cur_priority)
+{
+  struct thread * t = lk->holder;
+
+  ASSERT(t!=NULL);      /*make sure that t isn't NULL*/
+
   if(t->priority < cur_priority && cur_priority > t->donated_priority){
     /* if we can make donation, make it*/
+    if(lk->don_priority != t->donated_priority){
+      /*if the donation came from another lock*/
+      lk->old_don_priority = t->donated_priority;     /*save other donated priorities*/
+      t->num_of_donors++;     /*save this donation*/
+    }
     t->donated_priority = cur_priority;
+    lk->don_priority = cur_priority;
   }
 }
-void undo_donate(struct thread *t){
-  t->donated_priority = t->priority;
+
+/*return thread priority to its original state*/
+void 
+undo_donate(struct lock *lk)
+{
+  struct thread * t = thread_current();
+
+  ASSERT(t!=NULL);
+
+  if(lk->don_priority == t->donated_priority){
+    /* if the current donation is from this lock*/
+    t->donated_priority = lk->old_don_priority;
+  }
+  if(lk->don_priority != -1){
+    t->num_of_donors--;    /*if this thread donated before remove its donation*/
+  }
+  if(t->num_of_donors <= 0){
+    t->donated_priority = t->priority;
+  }
+  lk->don_priority = -1;
+  lk->old_don_priority = -1;
   thread_yield();
 }

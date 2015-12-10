@@ -489,6 +489,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->donated_priority = priority;
+  t->num_of_donors=0;
   t->magic = THREAD_MAGIC;
   list_push_back(&all_list,&t->allelem); /* insert unordered, no need to make this list ordered */
 }

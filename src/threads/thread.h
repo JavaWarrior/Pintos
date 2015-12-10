@@ -96,7 +96,7 @@ struct thread
     
     /*part2*/
     int donated_priority;                /*priority that is donated by any higher priority process that wants the lock*/
-
+    int num_of_donors;
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
