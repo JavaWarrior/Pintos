@@ -92,11 +92,13 @@ struct thread
 
     /*busy waiting*/
     struct list_elem wake_elem;
-    int64_t wake_up_ticks;               /* time to sleep in ticks. operand passed to thread_sleep()*/
+    int64_t wake_up_ticks;               /* Time to sleep in ticks. operand passed to thread_sleep()*/
     
     /*part2*/
-    int donated_priority;                /*priority that is donated by any higher priority process that wants the lock*/
-    int num_of_donors;
+    int donated_priority;                /* Priority that is donated by any higher priority process that wants the lock*/
+    int num_of_donors;                   /* Number of donors to this thread*/
+
+    struct lock * pending_lock;          /*lock that this thread need to continue*/
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
