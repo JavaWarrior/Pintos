@@ -11,12 +11,14 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/fixed-point.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
 #ifndef MAX
 #define MAX(__A,__B) (((__A)>(__B))?(__A):(__B))
 #endif
+#define ___FIXED__POINT__MACROS       /*we'll be using macros for fixed point operations*/
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
