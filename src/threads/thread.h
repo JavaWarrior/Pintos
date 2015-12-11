@@ -96,7 +96,7 @@ struct thread
     
     /*part2*/
     int donated_priority;                /* Priority that is donated by any higher priority process that wants the lock*/
-    int num_of_donors;                   /* Number of donors to this thread*/
+    struct list donors_list;
 
     struct lock * pending_lock;          /*lock that this thread need to continue*/
     /* Shared between thread.c and synch.c. */
