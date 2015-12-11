@@ -46,12 +46,11 @@ void cond_broadcast (struct condition *, struct lock *);
 
 
 /*for donation*/
-<<<<<<< HEAD
 struct donor_lock_element{
   struct lock * don_lock;
   struct list_elem elem;
 };
-=======
+
 void donate(struct lock * lk,int cur_priority);
 void undo_donate(struct lock *lk);
 void nested_donate(struct thread *t, struct lock * lk, int cur_priority);
