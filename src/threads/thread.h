@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/fixed-point.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -23,6 +24,7 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
 
 /* A kernel thread or user process.
 
@@ -87,8 +89,22 @@ struct thread
     enum thread_status status;          /* Thread state. */
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
-    int priority;                       /* Priority. */
+    int priority;                       /* Priority. shall we call it 'original priority'*/
     struct list_elem allelem;           /* List element for all threads list. */
+
+    /*busy waiting*/
+    struct list_elem wake_elem;
+    int64_t wake_up_ticks;               /* Time to sleep in ticks. operand passed to thread_sleep()*/
+    
+    /*part2*/
+    int donated_priority;                /* Priority that is donated by any higher priority process that wants the lock*/
+    struct list donors_list;
+
+    struct lock * pending_lock;          /*lock that this thread need to continue (nested donations)*/
+    
+    /*part3 4.4BSD scheduler*/
+    int nice;
+    fpoint recent_cpu;
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -137,5 +153,13 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+/*user added*/
+/*part2*/
+bool is_greater (const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux); /* function for ordered insertion (makes bigger come first)*/
+void reorder_scheduling(void); 
+
 
 #endif /* threads/thread.h */
