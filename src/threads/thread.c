@@ -532,7 +532,13 @@ init_thread (struct thread *t, const char *name, int priority)
   list_init(&t->donors_list);
 
   /*part3*/
-  t->nice = 0;
+  if(thread_mlfqs && t != initial_thread){
+    t->recent_cpu = thread_current()->recent_cpu;
+    t->nice = thread_current()->nice;
+  }else {
+    t->nice = 0;
+    t->recent_cpu = TO_FP(0);
+  } 
 
   t->magic = THREAD_MAGIC;
   list_push_back(&all_list,&t->allelem); /* insert unordered, no need to make this list ordered */
