@@ -1,0 +1,19 @@
+Merge made by the 'recursive' strategy.
+ src/devices/timer.c                    |  85 ++++++++++-----
+ src/devices/timer.h                    |   4 +-
+ src/lib/kernel/list.c                  |   2 +-
+ src/threads/DESIGNDOC/check.out        | 112 ++++++++++++++++++++
+ src/threads/DESIGNDOC/grade.out        |  75 +++++++++++++
+ src/threads/DESIGNDOC/threads.tmpl.txt | 162 ++++++++++++++++++++++++++++
+ src/threads/Make.vars                  |   2 +-
+ src/threads/fixed-point.h              |  92 ++++++++++++++++
+ src/threads/synch.c                    | 186 ++++++++++++++++++++++++++++++++-
+ src/threads/synch.h                    |   4 +
+ src/threads/thread.c                   | 184 +++++++++++++++++++++++++++++---
+ src/threads/thread.h                   |  26 ++++-
+ 12 files changed, 880 insertions(+), 54 deletions(-)
+ create mode 100644 src/threads/DESIGNDOC/check.out
+ create mode 100644 src/threads/DESIGNDOC/grade.out
+ create mode 100644 src/threads/DESIGNDOC/threads.tmpl.txt
+ create mode 100644 src/threads/fixed-point.h
+
