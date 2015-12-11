@@ -244,9 +244,12 @@ lock_release (struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
 
   lock->holder = NULL;
-  undo_donate(lock);    /*remove donations if any*/
   sema_up (&lock->semaphore);
   /*after unblocking we need to decrease our priority again*/
+  undo_donate(lock);    /*remove donations if any*/
+  /*here I have a question if we made the undo before the sema_up
+    many errors happens
+  */
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -361,10 +364,7 @@ donate(struct lock * lk,int cur_priority)
 {
   struct thread * t = lk->holder;
 
-  if(t == NULL){
-    return;
-  }
-  //ASSERT(t!=NULL);      /*make sure that t isn't NULL*/
+  ASSERT(t!=NULL);      /*make sure that t isn't NULL*/
 
   struct donor_lock_element * donor = get_donor_from_list(&t->donors_list, lk);
 
