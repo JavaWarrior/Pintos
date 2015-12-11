@@ -11,14 +11,22 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
-#include "threads/fixed-point.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
+
+#include "devices/timer.h"
+
+/*max function for comparison*/
 #ifndef MAX
 #define MAX(__A,__B) (((__A)>(__B))?(__A):(__B))
 #endif
-#define ___FIXED__POINT__MACROS       /*we'll be using macros for fixed point operations*/
+
+/*defines for advanced scheduler calculations*/
+/*number of clocks to update thread */
+#define __UPDATE_PRIO_FREQ  4
+
+
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
@@ -58,6 +66,10 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
 
+/*part3*/
+static fpoint system_load_avg;
+static int num_of_ready_threads;
+
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
@@ -74,6 +86,13 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+
+/*part3*/
+void update_priority(struct thread *t, void * lol UNUSED);
+void advanced_scheduler_update(int64_t ticks);
+void update_recent_cpu(struct thread *t, void *lol UNUSED);
+void update_system_load_avg(void);
+
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -96,6 +115,10 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+
+  /*for advanced scheduler */
+  system_load_avg = TO_FP(0);
+  num_of_ready_threads = 0;  /*main only running at start */
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -137,7 +160,7 @@ thread_tick (void)
 #endif
   else
     kernel_ticks++;
-
+  advanced_scheduler_update(timer_ticks());
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
@@ -170,6 +193,11 @@ tid_t
 thread_create (const char *name, int priority,
                thread_func *function, void *aux) 
 {
+  if(thread_mlfqs){
+    /*advanced scheduler mode*/
+    priority = PRI_DEFAULT;
+    /*in advance scheduler mode every thread is initialized with the default priority*/
+  }
   struct thread *t;
   struct kernel_thread_frame *kf;
   struct switch_entry_frame *ef;
@@ -251,8 +279,9 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_insert_ordered(&ready_list,&t->elem,&is_greater,NULL);  /*use ordered insertion to take car of queue*/
+  list_insert_ordered(&ready_list,&t->elem,&is_greater,NULL);  /*use ordered insertion to take care of pqueue*/
   t->status = THREAD_READY;
+  
   intr_set_level (old_level);
 }
 
@@ -349,6 +378,10 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  if(thread_mlfqs){
+    return;
+    /*priority can't be accessed in advanced scheduler mode*/
+  }
   struct thread *cur = thread_current ();
   ASSERT(cur!=NULL);
   /*may interrupts be disabled here if needed*/
@@ -372,38 +405,40 @@ thread_set_priority (int new_priority)
 int
 thread_get_priority (void) 
 {
+  if(thread_mlfqs){
+    return thread_current ()->priority;
+    /*in advanced mode there's no donation*/
+  }
   return (thread_current ()->donated_priority);
 }
 
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice UNUSED) 
+thread_set_nice (int nice) 
 {
-  /* Not yet implemented. */
+  thread_current ()->nice = nice;
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current ()->nice;
 }
 
-/* Returns 100 times the system load average. */
+/* Returns 100 times the system load average rounded to the nearst integer. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return TO_INT_ROUND(MUL_INT(system_load_avg,100));
 }
 
-/* Returns 100 times the current thread's recent_cpu value. */
+/* Returns 100 times the current thread's recent_cpu value rounded to the nearst integer. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return TO_INT_ROUND(MUL_INT(thread_current ()->recent_cpu,100));
+
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -490,9 +525,15 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+
+  /*part 2*/
   t->donated_priority = priority;
   t->pending_lock = NULL;
   list_init(&t->donors_list);
+
+  /*part3*/
+  t->nice = 0;
+
   t->magic = THREAD_MAGIC;
   list_push_back(&all_list,&t->allelem); /* insert unordered, no need to make this list ordered */
 }
@@ -617,18 +658,75 @@ allocate_tid (void)
     threads is first in the schduler.
 */
 bool
-is_greater (const struct list_elem *a, const struct list_elem *b, void *aux)
+is_greater (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
 {
   struct thread *t_a =  list_entry (a,struct thread, elem),*t_b = list_entry (b,struct thread, elem);
   ASSERT(t_a!=NULL && t_b!=NULL);
-  return (t_a->donated_priority > t_b->donated_priority);
+  if(!thread_mlfqs){
+    return (t_a->donated_priority > t_b->donated_priority);
+  }else{
+    /*in advanced scheduling mode donated priority isn't taken into consideration*/
+    return (t_a->priority > t_b->priority);    
+  }
 }
 void
-reorder_scheduling(void){
+reorder_scheduling(void)
+{
   /*this function is called mostly after donations to make donations effective*/
   list_sort(&ready_list,&is_greater,NULL);
 }
 
+/*part3*/
+/*do the math for advanced scheduler*/
+void 
+advanced_scheduler_update(int64_t ticks)
+{
+  if(!thread_mlfqs){
+    return;
+    /*only do this in advanced scheduling mode*/
+  }
+  thread_current ()-> recent_cpu = ADD_INT(thread_current ()->recent_cpu, 1);
+  /*every clock cycle recent_cpu is incremented by one to the running thread only*/
+
+  if(ticks%100 == 0){
+    /*load avg is update every second*/
+    update_system_load_avg();
+    /*once per second recent cpu is updated*/
+    thread_foreach(update_recent_cpu,NULL);
+  }
+  if(ticks % __UPDATE_PRIO_FREQ == 0){
+    /*every 4 clock cycles update priority*/
+    thread_foreach(update_priority,NULL);
+  }
+}
+
+void
+update_priority(struct thread * t, void * lol UNUSED)
+{
+  t->priority = PRI_MAX - TO_INT_ROUND(DIV_INT(t->recent_cpu,4)) - t->nice * 2;
+}
+
+void 
+update_recent_cpu(struct thread *t, void *lol UNUSED)
+{
+  /*recent_cpu = (2*load_avg)/(2*load_avg + 1) * recent_cpu + nice.*/
+  t->recent_cpu = ADD_INT(MUL_FP(DIV_FP(MUL_INT(system_load_avg,2),ADD_INT(MUL_INT(system_load_avg,2),1)),t->recent_cpu),t->nice);
+}
+
+void
+update_system_load_avg(void)
+{
+  /*update ready*/
+  num_of_ready_threads = (int) list_size(&ready_list);
+  /*check ready threads in queue*/
+  if(thread_current() != idle_thread){
+    num_of_ready_threads++;
+    /*if idle thread is not running then there's a thread running*/
+  }  
+  /*load_avg = (59/60)*load_avg + (1/60)*ready_threads*/
+  system_load_avg = DIV_INT(MUL_INT(system_load_avg,59),60);
+  system_load_avg = ADD_FP(DIV_INT(TO_FP(num_of_ready_threads),60),system_load_avg);
+}
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */

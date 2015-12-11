@@ -34,6 +34,23 @@
 
 #include "threads/malloc.h"
 
+/*user added*/
+/*for donation*/
+struct donor_lock_element{
+  struct lock * don_lock;
+  struct list_elem elem;
+};
+
+void donate(struct lock * lk,int cur_priority);
+void undo_donate(struct lock *lk);
+void nested_donate(struct thread *t, struct lock * lk, int cur_priority);
+void remove_and_refresh_priority (struct thread * t, struct lock * lk);
+struct donor_lock_element * get_donor_from_list(struct list * l, struct lock * lk);
+
+/*for semaphore condition variable comparison*/
+bool is_greater_sema (const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux); /* function for ordered insertion (makes higher priority come first)*/
 
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
@@ -248,8 +265,9 @@ lock_release (struct lock *lock)
   /*after unblocking we need to decrease our priority again*/
   undo_donate(lock);    /*remove donations if any*/
   /*here I have a question if we made the undo before the sema_up
-    many errors happens
+    many errors happens. maybe if the thread is lowered it won't up the sema.
   */
+  thread_yield();             /*yield to check higher priority unlocked threas*/
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -425,15 +443,20 @@ undo_donate(struct lock *lk)
     remove_and_refresh_priority(t,lk);
     lk->don_priority = -1;
   }
-  thread_yield();             /*yield to check higher priority unlocked threas*/
 }
 
 /* comparison function for semaphore list*/
 bool
-is_greater_sema (const struct list_elem *a, const struct list_elem *b, void *aux)
+is_greater_sema (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
 {
   struct thread *t_a =  list_entry (a,struct semaphore_elem, elem)->t,*t_b = list_entry (b,struct semaphore_elem, elem)->t;
-  return (t_a->donated_priority > t_b->donated_priority);
+  
+  if(!thread_mlfqs){
+    return (t_a->donated_priority > t_b->donated_priority);
+  }else{
+    /*in advanced scheduling mode donated priority isn't taken into consideration*/
+    return (t_a->priority > t_b->priority);    
+  }
 }
 
 /*search for donor_loc_elem with lk in list l*/
