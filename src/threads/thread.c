@@ -372,7 +372,7 @@ thread_set_priority (int new_priority)
 int
 thread_get_priority (void) 
 {
-  return MAX(thread_current ()->priority,thread_current ()->donated_priority);
+  return (thread_current ()->donated_priority);
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -491,8 +491,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->donated_priority = priority;
-  t->num_of_donors=0;
   t->pending_lock = NULL;
+  list_init(&t->donors_list);
   t->magic = THREAD_MAGIC;
   list_push_back(&all_list,&t->allelem); /* insert unordered, no need to make this list ordered */
 }
@@ -620,7 +620,8 @@ bool
 is_greater (const struct list_elem *a, const struct list_elem *b, void *aux)
 {
   struct thread *t_a =  list_entry (a,struct thread, elem),*t_b = list_entry (b,struct thread, elem);
-  return (MAX(t_a->donated_priority,t_a->priority) > MAX(t_b->donated_priority,t_b->priority));
+  ASSERT(t_a!=NULL && t_b!=NULL);
+  return (t_a->donated_priority > t_b->donated_priority);
 }
 void
 reorder_scheduling(void){

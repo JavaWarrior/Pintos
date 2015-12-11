@@ -31,9 +31,10 @@
 #include <string.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
-#ifndef MAX
-#define MAX(__A,__B) (((__A)>(__B))?(__A):(__B))
-#endif
+
+#include "threads/malloc.h"
+
+
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -186,7 +187,6 @@ lock_init (struct lock *lock)
   lock->holder = NULL;
   sema_init (&lock->semaphore, 1);
   lock->don_priority = -1;
-  lock->old_don_priority=-1;
 }
 
 /* Acquires LOCK, sleeping until it becomes available if
@@ -206,7 +206,7 @@ lock_acquire (struct lock *lock)
   if(lock->semaphore.value <= 0){
     /*if another thread is holding the lock*/
     thread_current()->pending_lock = lock;
-    donate(lock, MAX(thread_current()->priority,thread_current()->donated_priority));
+    donate(lock, thread_current()->donated_priority);
   }
   sema_down (&lock->semaphore);   /*take the lock*/
   lock->holder = thread_current ();
@@ -246,7 +246,10 @@ lock_release (struct lock *lock)
   lock->holder = NULL;
   sema_up (&lock->semaphore);
   /*after unblocking we need to decrease our priority again*/
-  undo_donate(lock);
+  undo_donate(lock);    /*remove donations if any*/
+  /*here I have a question if we made the undo before the sema_up
+    many errors happens
+  */
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -363,15 +366,23 @@ donate(struct lock * lk,int cur_priority)
 
   ASSERT(t!=NULL);      /*make sure that t isn't NULL*/
 
-  if(t->priority < cur_priority && cur_priority > t->donated_priority){
-    /* if we can make donation, make it*/
-    if(lk->don_priority != t->donated_priority){
-      /*if the donation came from another lock*/
-      lk->old_don_priority = t->donated_priority;     /*save other donated priorities*/
-      t->num_of_donors++;     /*save this donation*/
+  struct donor_lock_element * donor = get_donor_from_list(&t->donors_list, lk);
+
+  if(donor == NULL){
+    /* this lock have not donated before*/
+    if(cur_priority > t->priority){
+      /*this thread can make donation*/
+      donor = (struct donor_lock_element *) malloc(sizeof (struct donor_lock_element));
+      ASSERT(donor != NULL);
+      lk->don_priority = cur_priority;  /*save donation in lock*/
+      donor->don_lock = lk;               /*save lock in thread donors list*/
+      list_push_back(&t->donors_list, &donor->elem);
     }
-    t->donated_priority = cur_priority; /*donate priority */
-    lk->don_priority = cur_priority;    /*save that this priority relates to us*/
+  }else if(cur_priority > lk->don_priority ){
+    lk->don_priority = cur_priority;      /*modify lock donation only*/
+  }
+  if(cur_priority > t->donated_priority){
+      t->donated_priority = cur_priority;
   }
   nested_donate(t, lk, cur_priority);  /*go to thread that is holding necessary lock*/
 }
@@ -387,7 +398,7 @@ nested_donate(struct thread *t, struct lock * lk, int cur_priority)
         /* donate to this thread if possible*/
       if(t->priority < cur_priority && cur_priority > t->donated_priority){
         t->donated_priority = cur_priority;   /*donate to the thread*/
-        lk->don_priority = cur_priority;      /*change lock saved donation to ensure that this lock made the donation*/
+        lk->don_priority = cur_priority;      /*save donation in lock*/
       }else{
         break;
       }
@@ -408,28 +419,73 @@ undo_donate(struct lock *lk)
   struct thread * t = thread_current(); /*get the thread that took the donation*/
 
   ASSERT(t!=NULL);
-
-  if(lk->don_priority == t->donated_priority){
-    /* if the current donation is from the current lock released*/
-    t->donated_priority = lk->old_don_priority;
-    /* if previous donations was made keep them*/
+  struct donor_lock_element * donor = get_donor_from_list(&t->donors_list, lk);
+  if(donor != NULL){
+    /* this lock donated to this thread*/
+    remove_and_refresh_priority(t,lk);
+    lk->don_priority = -1;
   }
-  if(lk->don_priority != -1){
-    t->num_of_donors--;    /*if this thread donated before remove its donation*/
-  }
-  if(t->num_of_donors <= 0){
-    t->donated_priority = t->priority;
-    /*  if the current thread still have donation even after all locks released
-    *   then remove any donations
-    *   (overlaping case)*/
-  }
-  lk->don_priority = -1;      /*mark that this lock doesn't have to make anyother donations*/
-  lk->old_don_priority = -1;  
   thread_yield();             /*yield to check higher priority unlocked threas*/
 }
+
+/* comparison function for semaphore list*/
 bool
 is_greater_sema (const struct list_elem *a, const struct list_elem *b, void *aux)
 {
   struct thread *t_a =  list_entry (a,struct semaphore_elem, elem)->t,*t_b = list_entry (b,struct semaphore_elem, elem)->t;
-  return (MAX(t_a->donated_priority,t_a->priority) > MAX(t_b->donated_priority,t_b->priority));
+  return (t_a->donated_priority > t_b->donated_priority);
+}
+
+/*search for donor_loc_elem with lk in list l*/
+struct donor_lock_element *
+get_donor_from_list(struct list * l, struct lock * lk)
+{
+  
+  ASSERT (lk != NULL);
+  ASSERT (l != NULL);
+
+  struct list_elem * e ;
+  struct donor_lock_element * donor;
+  for(e = list_begin(l); e != list_end(l); e = list_next(e)){
+    donor = list_entry(e ,struct donor_lock_element, elem);
+    if(donor->don_lock == lk){
+      /*if the two pointers have the same address*/
+      return donor;
+    }
+  }
+  return NULL;
+}
+
+/*search for lock lk in t donors list and remove it and refreshes priority*/
+void
+remove_and_refresh_priority (struct thread * t, struct lock * lk)
+{
+  ASSERT (lk != NULL);
+  ASSERT (t != NULL);
+
+  struct list_elem * e = list_begin(&t->donors_list);
+  struct donor_lock_element * donor;
+  int max_prio = 0;
+  while( e != list_end(&t->donors_list)){
+    donor = list_entry(e ,struct donor_lock_element, elem);
+    if(donor->don_lock == lk){
+      /*if the two pointers have the same address*/
+      e = list_remove(&donor->elem);
+      /*remove the lock for the donors list*/
+      continue;
+      /*no need to advance pointer*/
+    }else if(donor->don_lock->don_priority > max_prio){
+      max_prio = donor->don_lock->don_priority;
+      /*compute max priority from donors*/
+    }
+    e = list_next(e);
+    /*advance pointer*/
+  }
+  if(max_prio == 0){
+    /*no remaining donors in the list*/
+    t->donated_priority = t->priority;
+  }else{
+    /*set the  priority to the second maximum*/
+    t->donated_priority = max_prio;
+  }
 }

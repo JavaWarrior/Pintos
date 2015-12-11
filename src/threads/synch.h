@@ -24,7 +24,6 @@ struct lock
     struct semaphore semaphore; /* Binary semaphore controlling access. */
 
     int don_priority;           /*donated priority from this lock*/
-    int old_don_priority;       /*old donated priority*/
 
   };
 
@@ -47,13 +46,17 @@ void cond_broadcast (struct condition *, struct lock *);
 
 
 /*for donation*/
+<<<<<<< HEAD
 struct donor_lock_element{
   struct lock * don_lock;
   struct list_elem elem;
 };
+=======
 void donate(struct lock * lk,int cur_priority);
 void undo_donate(struct lock *lk);
 void nested_donate(struct thread *t, struct lock * lk, int cur_priority);
+void remove_and_refresh_priority (struct thread * t, struct lock * lk);
+struct donor_lock_element * get_donor_from_list(struct list * l, struct lock * lk);
 
 /*for semaphore condition variable comparison*/
 bool is_greater_sema (const struct list_elem *a,
