@@ -30,6 +30,7 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
+bool is_less_timer(const struct list_elem * a, const struct list_elem * b, void * aux UNUSED);
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
@@ -94,7 +95,7 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks ();
   struct thread *cur = thread_current ();
   cur->wake_up_ticks = start + ticks;
-  list_push_back (&waiting_list,&cur->wake_elem);
+  list_insert_ordered (&waiting_list,&cur->wake_elem,&is_less_timer,NULL);
   /*disabling interrupts*/
   enum intr_level old_level;        /*current interrupt status*/
   ASSERT (!intr_context ());        /*make sure no interrupt is being processed*/
@@ -265,9 +266,20 @@ check_wake_ups(void){
     if(timer_ticks() >= t->wake_up_ticks){
       e = list_remove (&t->wake_elem); 
       thread_unblock(t);
-      continue; /*now that e is already pointing to the next element no need to advance it*/
+       /*now that e is already pointing to the next element no need to advance it*/
+    }else{
+      break;
     }
-    e = list_next (e);
+    
   }
 
+}
+/*comparison function for insertion in sleeping threads list*/
+bool
+is_less_timer (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  struct thread *t_a =  list_entry (a,struct thread, wake_elem),*t_b = list_entry (b,struct thread, wake_elem);
+  ASSERT(t_a!=NULL && t_b!=NULL);
+  /* return the nearest element to wake up*/
+  return t_a->wake_up_ticks < t_b->wake_up_ticks;
 }

@@ -93,7 +93,7 @@ struct thread
     struct list_elem allelem;           /* List element for all threads list. */
 
     /*busy waiting*/
-    struct list_elem wake_elem;
+    struct list_elem wake_elem;          /*store sleeping elements*/
     int64_t wake_up_ticks;               /* Time to sleep in ticks. operand passed to thread_sleep()*/
     
     /*part2*/

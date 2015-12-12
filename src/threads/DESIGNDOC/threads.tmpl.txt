@@ -8,9 +8,9 @@
 
 >> Fill in the names and email addresses of your group members.
 
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
+Mohamed Ramadan 	<MRamadanCSED@outlook.com>
+Marwan 	Aly 		<marwanaly2050@gmail.com>
+Yehia 	Khairy 		<yehia.khaery2017@gmail.com>
 
 ---- PRELIMINARIES ----
 
@@ -21,6 +21,9 @@ FirstName LastName <email@domain.example>
 >> preparing your submission, other than the Pintos documentation, course
 >> text, lecture notes, and course staff.
 
+git documentation for using git
+
+
 			     ALARM CLOCK
 			     ===========
 
@@ -30,10 +33,21 @@ FirstName LastName <email@domain.example>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+	added variable to mark when this thread should be awaken. also added list_elem
+	so that we can save threads that need to be awaken.
+	added to struct thread:
+		struct list_elem wake_elem;			/*store sleeping elements*/
+    	int64_t wake_up_ticks;				/* Time to sleep in ticks. operand passed to thread_sleep()*/
+
 ---- ALGORITHMS ----
 
 >> A2: Briefly describe what happens in a call to timer_sleep(),
 >> including the effects of the timer interrupt handler.
+
+	when timer_sleep() is called, first thread wake_up time is updated 
+	according to the parameter passed to the function. then it's added to
+	the sleeping threads list.	when timer interrupt handler occurs a 
+	function called check_wake_ups() checks that if there's a thread to wake.
 
 >> A3: What steps are taken to minimize the amount of time spent in
 >> the timer interrupt handler?
