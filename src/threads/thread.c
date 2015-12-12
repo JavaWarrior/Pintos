@@ -195,7 +195,7 @@ thread_create (const char *name, int priority,
 {
   if(thread_mlfqs){
     /*advanced scheduler mode*/
-    priority = PRI_DEFAULT;
+    priority = PRI_MAX;
     /*in advance scheduler mode every thread is initialized with the default priority*/
   }
   struct thread *t;
@@ -426,14 +426,14 @@ thread_get_nice (void)
   return thread_current ()->nice;
 }
 
-/* Returns 100 times the system load average rounded to the nearst integer. */
+/* Returns 100 times the system load average rounded to the nearest integer. */
 int
 thread_get_load_avg (void) 
 {
   return TO_INT_ROUND(MUL_INT(system_load_avg,100));
 }
 
-/* Returns 100 times the current thread's recent_cpu value rounded to the nearst integer. */
+/* Returns 100 times the current thread's recent_cpu value rounded to the nearest integer. */
 int
 thread_get_recent_cpu (void) 
 {
@@ -499,7 +499,7 @@ running_thread (void)
   /* Copy the CPU's stack pointer into `esp', and then round that
      down to the start of a page.  Because `struct thread' is
      always at the beginning of a page and the stack pointer is
-     somewhere in the middle, this locates the curent thread. */
+     somewhere in the middle, this locates the current thread. */
   asm ("mov %%esp, %0" : "=g" (esp));
   return pg_round_down (esp);
 }
@@ -540,6 +540,10 @@ init_thread (struct thread *t, const char *name, int priority)
     t->recent_cpu = TO_FP(0);
   } 
 
+  if(thread_mlfqs){
+      t->priority = PRI_MAX - TO_INT_ROUND(DIV_INT(t->recent_cpu,4)) - t->nice * 2;
+      /*initial priority*/
+  }
   t->magic = THREAD_MAGIC;
   list_push_back(&all_list,&t->allelem); /* insert unordered, no need to make this list ordered */
 }
@@ -661,7 +665,7 @@ allocate_tid (void)
 
 /*  function is used in the scheduler priority insertion and deletion
     this function inverses the insertion mechanism so that higher priority
-    threads is first in the schduler.
+    threads is first in the scheduler.
 */
 bool
 is_greater (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
@@ -682,7 +686,7 @@ reorder_scheduling(void)
   list_sort(&ready_list,&is_greater,NULL);
 }
 
-/*part3*/
+/*part 3*/
 /*do the math for advanced scheduler*/
 void 
 advanced_scheduler_update(int64_t ticks)
@@ -697,7 +701,7 @@ advanced_scheduler_update(int64_t ticks)
   if(ticks%100 == 0){
     /*load avg is update every second*/
     update_system_load_avg();
-    /*once per second recent cpu is updated*/
+    /*once per second recent CPU is updated*/
     thread_foreach(update_recent_cpu,NULL);
   }
   if(ticks % __UPDATE_PRIO_FREQ == 0){

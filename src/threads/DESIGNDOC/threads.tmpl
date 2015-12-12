@@ -51,19 +51,32 @@ git documentation for using git
 
 >> A3: What steps are taken to minimize the amount of time spent in
 >> the timer interrupt handler?
-
+	when inserting elements into the list, they're inserted ordered
+	(nearest wake-up time first) so when timer_interrupt checks sleeping
+	threads it can check only on the threads that can wake up. which makes 
+	handling much faster.
 ---- SYNCHRONIZATION ----
 
 >> A4: How are race conditions avoided when multiple threads call
 >> timer_sleep() simultaneously?
 
+	the only race condition is when a thread is pushed into the list
+	so we made that operation atomic using disable interrupts because
+	anyway we've to disable interrupts to call thread_block().
+
 >> A5: How are race conditions avoided when a timer interrupt occurs
 >> during a call to timer_sleep()?
+	
+	because the interrupts are disabled during insertion of new thread 
+	and blocking it. races conditions are avoids.
 
 ---- RATIONALE ----
 
 >> A6: Why did you choose this design?  In what ways is it superior to
 >> another design you considered?
+	I saw it's the only meaningful design. another design I was thinking of is
+	making software interrupts for every sleeping thread but it may cause overhead.
+
 
 			 PRIORITY SCHEDULING
 			 ===================
@@ -73,6 +86,10 @@ git documentation for using git
 >> B1: Copy here the declaration of each new or changed `struct' or
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
+
+	
+
+
 
 >> B2: Explain the data structure used to track priority donation.
 >> Use ASCII art to diagram a nested donation.  (Alternately, submit a
@@ -108,7 +125,9 @@ git documentation for using git
 >> C1: Copy here the declaration of each new or changed `struct' or
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
-
+	added those to struct thread:
+	int nice;				/*niceness of a thread*/
+    fpoint recent_cpu;		/*recent cpu of a thread*/
 ---- ALGORITHMS ----
 
 >> C2: Suppose threads A, B, and C have nice values 0, 1, and 2.  Each

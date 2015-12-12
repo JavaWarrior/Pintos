@@ -95,11 +95,12 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks ();
   struct thread *cur = thread_current ();
   cur->wake_up_ticks = start + ticks;
-  list_insert_ordered (&waiting_list,&cur->wake_elem,&is_less_timer,NULL);
+  
   /*disabling interrupts*/
   enum intr_level old_level;        /*current interrupt status*/
   ASSERT (!intr_context ());        /*make sure no interrupt is being processed*/
   old_level = intr_disable ();      /*disable interrupt*/
+  list_insert_ordered (&waiting_list,&cur->wake_elem,&is_less_timer,NULL);
   /*block this thread. interrupt must be disabled when calling this function*/ 
   thread_block();
   intr_set_level(old_level);        /*enable interrupts*/ 
