@@ -67,8 +67,8 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
 
 /*part3*/
-static fpoint system_load_avg;
-static int num_of_ready_threads;
+static fpoint system_load_avg;  /*system load average for mlfqs*/
+static int num_of_ready_threads;/*ready to run + running threads counter */
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -351,7 +351,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_insert_ordered(&ready_list,&cur->elem,&is_greater,NULL);  /*use ordered insertion to take car of queue*/
+    list_insert_ordered(&ready_list,&cur->elem,&is_greater,NULL);  /*use ordered insertion to take care of queue*/
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -698,24 +698,28 @@ advanced_scheduler_update(int64_t ticks)
   thread_current ()-> recent_cpu = ADD_INT(thread_current ()->recent_cpu, 1);
   /*every clock cycle recent_cpu is incremented by one to the running thread only*/
 
-  if(ticks%100 == 0){
+  if(ticks%TIMER_FREQ == 0){
     /*load avg is update every second*/
     update_system_load_avg();
     /*once per second recent CPU is updated*/
     thread_foreach(update_recent_cpu,NULL);
-  }
-  if(ticks % __UPDATE_PRIO_FREQ == 0){
     /*every 4 clock cycles update priority*/
     thread_foreach(update_priority,NULL);
   }
+  if(ticks % __UPDATE_PRIO_FREQ == 0){
+    /*every 4 clock cycles update priority*/
+    update_priority(thread_current() , NULL);
+  }
 }
 
+/*update priority for each thread*/
 void
 update_priority(struct thread * t, void * lol UNUSED)
 {
   t->priority = PRI_MAX - TO_INT_ROUND(DIV_INT(t->recent_cpu,4)) - t->nice * 2;
 }
 
+/*update recent cpu for each thread*/
 void 
 update_recent_cpu(struct thread *t, void *lol UNUSED)
 {
@@ -723,6 +727,7 @@ update_recent_cpu(struct thread *t, void *lol UNUSED)
   t->recent_cpu = ADD_INT(MUL_FP(DIV_FP(MUL_INT(system_load_avg,2),ADD_INT(MUL_INT(system_load_avg,2),1)),t->recent_cpu),t->nice);
 }
 
+/*update system load average*/
 void
 update_system_load_avg(void)
 {

@@ -86,25 +86,63 @@ git documentation for using git
 >> B1: Copy here the declaration of each new or changed `struct' or
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
+	added in thread struct in thread.h :
+		int donated_priority;                /* Priority that is donated by any higher priority process that wants the lock*/
+	    struct list donors_list;
+	    struct lock * pending_lock;          /*lock that this thread need to continue (nested donations)*/
+	    donated_priority is responsible of the temporary increase of priority because of
+	     donation. pending lock is used in nested donation which represents what lock is blocking
+	     the thread. donors list has all the valid donations made to this thread.
+	added in struct lock in synch.h:
+	    int don_priority;           /*donated priority from this lock*/
+	    this variable was made to save the donation made to this lock holder
+	    by any blocked thread by this lock.
+	added in synch.c 
+		struct donor_lock_element{
+  			struct lock * don_lock;       /*the lock corresponding to this donation*/
+  			struct list_elem elem;        /*list element to save donation for every thread*/
+		};
 
-	
-
+		this element ease the problem of multiple donation as every donation made by thread
+		is saved into donors list and when donation expires the second max donation from
+		donors list is taken and so on.
 
 
 >> B2: Explain the data structure used to track priority donation.
 >> Use ASCII art to diagram a nested donation.  (Alternately, submit a
 >> .png file.)
+						(thread H)				⌄thread H is blocked by lock a
+							|					⌄					thread H now runs <--------------
+						pending_lock->holder	⌄--> thread H donates to lock a holder (thread M)	^
+									|			⌄													^
+								 (thread M)		⌄--> thread M is locked by lock 					^
+								 	|			⌄					thread M unlocks lock a <-------^
+						pending_lock->holder	⌄--> thread M donates to lock b holder (thread L)	^
+							|					⌄													^
+						(thread L)				⌄--> thread L unlocks lock b    --------------------^
+
 
 ---- ALGORITHMS ----
 
 >> B3: How do you ensure that the highest priority thread waiting for
 >> a lock, semaphore, or condition variable wakes up first?
 
+	when using the list, sort is used to make sure max priority thread is taken first.
+
 >> B4: Describe the sequence of events when a call to lock_acquire()
 >> causes a priority donation.  How is nested donation handled?
 
+	thread L has lock a, thread H created and calls lock_acquire(lock a). then it knows
+	that the lock is hold by another thread. it gets the lock holder and donate to it.
+	then it starts a recursive_donation function that keeps getting blocking lock and
+	donating to their holders. when donation is made scheduler calls holding threads to
+	release the lock.
+
 >> B5: Describe the sequence of events when lock_release() is called
 >> on a lock that a higher-priority thread is waiting for.
+
+	when calling thread release, first the semaphore is upped and cpu is yielded which 
+	finds the high priority thread and runs it, and then returns to this thread and decreases priority.
 
 ---- SYNCHRONIZATION ----
 
@@ -112,10 +150,16 @@ git documentation for using git
 >> how your implementation avoids it.  Can you use a lock to avoid
 >> this race?
 
+	not accessing global data in the code, so no possible races.
+
 ---- RATIONALE ----
 
 >> B7: Why did you choose this design?  In what ways is it superior to
 >> another design you considered?
+	this design makes it easy to debug. using less variables and using periodic 
+	functions to make checks for you is good. but this design requires many yields 
+	that aren't necessary in some times. but it's the best when using list API
+	in pintos.
 
 			  ADVANCED SCHEDULER
 			  ==================
@@ -126,8 +170,12 @@ git documentation for using git
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 	added those to struct thread:
-	int nice;				/*niceness of a thread*/
-    fpoint recent_cpu;		/*recent cpu of a thread*/
+		int nice;				/*niceness of a thread*/
+	    fpoint recent_cpu;		/*recent cpu of a thread*/
+	added to thread.c
+		static fpoint system_load_avg;  /*system load average for mlfqs*/
+		static int num_of_ready_threads;/*ready to run + running threads counter */
+
 ---- ALGORITHMS ----
 
 >> C2: Suppose threads A, B, and C have nice values 0, 1, and 2.  Each
@@ -135,27 +183,42 @@ git documentation for using git
 >> scheduling decision and the priority and recent_cpu values for each
 >> thread after each given number of timer ticks:
 
-timer  recent_cpu    priority   thread
-ticks   A   B   C   A   B   C   to run
------  --  --  --  --  --  --   ------
- 0
- 4
- 8
-12
-16
-20
-24
-28
-32
-36
+priority = prio_max - (recent_cpu/4) - nice *2;
+assume yielding every 4 ticks.
+timer  recent_cpu    priority   thread 	
+ticks   A   B   C   A   B   C   to run 		
+-----  --  --  --  --  --  --   ------		
+ 0		0	0	0	63	61	59		A			
+ 4		4	0	0	62	61	59		A			
+ 8		8	0	0	61	61	59		B
+12		8	4	0	61	60	59		A
+16		12	4	0	60	60	59		B
+20		12	8	0	60	59	59		A
+24		16	8	0	59	59	59		C
+28		16	8	4	59	59	58		B
+32		16	12	4	59	58	58		A
+36		20	12	4	58	58	58		C
 
 >> C3: Did any ambiguities in the scheduler specification make values
 >> in the table uncertain?  If so, what rule did you use to resolve
 >> them?  Does this match the behavior of your scheduler?
+	
+	-the order of calculating variables. I updated the avg_load first
+	and then recent_cpu because it depends on avg_load and then priority
+	because it depends on recent_cpu. and it matches behavior of my sch.
+
+	-choosing next thread when two or more threads are with the same
+	priority. I used round robin which acts as fifo queue. and I assume that
+	when thread yields it is put at the back of its priority level queue.
 
 >> C4: How is the way you divided the cost of scheduling between code
 >> inside and outside interrupt context likely to affect performance?
 
+	most of the code are done inside the interrupt context, because we need
+	to update every certain time.
+	one enhancement that can be made is to increase the running thread's priority
+	only every 4 ticks. and all other threads every 100 ticks. which enhances the
+	speed. 
 ---- RATIONALE ----
 
 >> C5: Briefly critique your design, pointing out advantages and
@@ -163,13 +226,22 @@ ticks   A   B   C   A   B   C   to run
 >> time to work on this part of the project, how might you choose to
 >> refine or improve your design?
 
+	in this particular part I'd say that most of the design is made by 
+	the assignment itself. but the enhancements in updating priority
+	and choosing the order of the update may be the only decisions made here.
+	if I had time I'd try to make it requires less interrupt context time.
+	and I'd increase the readability of fixed-point operations somehow.
+
 >> C6: The assignment explains arithmetic for fixed-point math in
 >> detail, but it leaves it open to you to implement it.  Why did you
 >> decide to implement it the way you did?  If you created an
 >> abstraction layer for fixed-point math, that is, an abstract data
 >> type and/or a set of functions or macros to manipulate fixed-point
 >> numbers, why did you do so?  If not, why not?
-
+	I did so to make the operations rigid and any error can be fixed 
+	once and for all. so no need to repeat any fixed-point operation 
+	every time we need one. I made two implementations using macros and
+	functions. I used Macros here to have less extra code in kernel.
 			   SURVEY QUESTIONS
 			   ================
 
@@ -181,15 +253,22 @@ the quarter.
 
 >> In your opinion, was this assignment, or any one of the three problems
 >> in it, too easy or too hard?  Did it take too long or too little time?
+	
+	the advanced scheduler is not that important and didn't gave us much 
+	to know. but knowing the algorithm itself was good. also it takes a
+	lot of debugging time. after all debugging tools isn't that good.
 
 >> Did you find that working on a particular part of the assignment gave
 >> you greater insight into some aspect of OS design?
+	
+	all parts did, but second part gave me of how OS design uses so little
+	resources to make very hard tasks.
 
 >> Is there some particular fact or hint we should give students in
 >> future quarters to help them solve the problems?  Conversely, did you
 >> find any of our guidance to be misleading?
-
+	reading this document first is a must !
 >> Do you have any suggestions for the TAs to more effectively assist
 >> students, either for future quarters or the remaining projects?
-
+	why discussion ?
 >> Any other comments?

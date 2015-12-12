@@ -37,8 +37,8 @@
 /*user added*/
 /*for donation*/
 struct donor_lock_element{
-  struct lock * don_lock;
-  struct list_elem elem;
+  struct lock * don_lock;       /*the lock corresponding to this donation*/
+  struct list_elem elem;        /*list element to save donation for every thread*/
 };
 
 void donate(struct lock * lk,int cur_priority);
