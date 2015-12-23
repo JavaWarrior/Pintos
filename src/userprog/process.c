@@ -18,8 +18,18 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+/*added includes*/
+#include "threads/malloc.h"
+#include "threads/vaddr.h"
+
+/*added defines*/
+#define __ARGV_INIT_SIZE 10       /*initial allocated size for argv*/
+#define __ARGV_REALLOC_SIZE 10    /*added size when we reallocate argv*/
+
+/*added definitions*/
+
 static thread_func start_process NO_RETURN;
-static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static bool load (const char *cmdline, void (**eip) (void), void **esp, char ** argv, uint32_t argc);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -54,17 +64,43 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+  /*tokenizing part*/
+  ASSERT(file_name != NULL)
+  char * line = file_name,**argv, *token, *save_ptr;                  /*variables to tokenize the string"*/
+  uint32_t argv_indx =0;
+  uint32_t __ARGV_SIZE = __ARGV_INIT_SIZE;
+
+  argv = (char **) malloc( __ARGV_SIZE * sizeof(char *));     /*allocate argv*/
+
+  for (token = strtok_r ((char *)line, " \t", (char **)&save_ptr); token != NULL;
+        token = strtok_r (NULL, " \t", (char **)&save_ptr)){
+    if(argv_indx == __ARGV_SIZE)                                                /*if our variable if full*/
+    { 
+      __ARGV_SIZE += __ARGV_REALLOC_SIZE;                               /*increase argv size*/
+      
+      argv = (char **) realloc((char **)argv, __ARGV_SIZE * sizeof(char *));
+      /*reallocate argv after expanding its size*/
+    }
+    argv[argv_indx++] = token;                                                  /*store tokens*/
+  }
+  file_name = argv[0];
+  /*end of tokenizing*/
+
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+
+
+  success = load (file_name, &if_.eip, &if_.esp,argv,argv_indx);
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) 
+  if (!success){ 
     thread_exit ();
+    printf("a7eh\n");
+  }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -195,7 +231,7 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (void **esp,char ** argv, uint32_t argc);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -206,7 +242,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
 bool
-load (const char *file_name, void (**eip) (void), void **esp) 
+load (const char *file_name, void (**eip) (void), void **esp, char ** argv, uint32_t argc) 
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -214,7 +250,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofs;
   bool success = false;
   int i;
-
+  
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
@@ -302,7 +338,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (esp,argv,argc))
     goto done;
 
   /* Start address. */
@@ -425,9 +461,62 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 }
 
 /* Create a minimal stack by mapping a zeroed page at the top of
-   user virtual memory. */
+   user virtual memory.
+
+   PHYS_BASE +----------------------------------+
+             |            user stack            |
+             |                 |                |
+             |                 |                |
+             |                 V                |
+             |          grows downward          |
+             |                                  |
+             |                                  |
+             |                                  |
+             |                                  |
+             |           grows upward           |
+             |                 ^                |
+             |                 |                |
+             |                 |                |
+             +----------------------------------+
+             | uninitialized data segment (BSS) |
+             +----------------------------------+
+             |     initialized data segment     |
+             +----------------------------------+
+             |           code segment           |
+  0x08048000 +----------------------------------+
+             |                                  |
+             |                                  |
+             |                                  |
+             |                                  |
+             |                                  |
+           0 +----------------------------------+
+
+  ex:
+  /bin/ls -l foo
+  argv =  "/bin/ls"
+          "-l"
+          "foo"
+          0
+  argc =  3
+  0xbffffffc  argv[3][...]    bar\0           char[4]
+  0xbffffff8  argv[2][...]    foo\0           char[4]
+  0xbffffff5  argv[1][...]    -l\0            char[3]
+  0xbfffffed  argv[0][...]    /bin/ls\0       char[8]
+  0xbfffffec  word-align      0               uint8_t
+  0xbfffffe8  argv[4]         0               char *
+  0xbfffffe4  argv[3]         0xbffffffc      char *
+  0xbfffffe0  argv[2]         0xbffffff8      char *
+  0xbfffffdc  argv[1]         0xbffffff5      char *
+  0xbfffffd8  argv[0]         0xbfffffed      char *
+  0xbfffffd4  argv            0xbfffffd8      char **
+  0xbfffffd0  argc            4               int
+  0xbfffffcc  return address  0               void (*) ()
+  
+
+*/
+
 static bool
-setup_stack (void **esp) 
+setup_stack (void **esp,char ** argv, uint32_t argc) 
 {
   uint8_t *kpage;
   bool success = false;
@@ -437,7 +526,51 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success){
-        *esp = PHYS_BASE;
+        *esp = PHYS_BASE;                          /*make esp at the end of the page*/
+        int32_t i = 0;
+
+        char ** char_ptr = (char **) esp;
+        uint32_t ** int_ptr = (uint32_t **) esp;
+
+        /*copy values of argv*/
+        for(i=argc-1; i >= 0; i--)
+        {
+          *char_ptr -=  strlen(argv[i]) + 1;        /*decrease value of esp */
+          strlcpy(*char_ptr, argv[i], strlen(argv[i])+1);  /*copy argv to stack pointer*/
+          argv[i] = *char_ptr;
+        }
+
+        /*chars need to be packed*/
+        while( (uint32_t)*char_ptr % 4 != 0){
+          *--*char_ptr = (char) 0;  
+        }
+
+        /*argv is terminated by zero*/
+        char *** dbl_ptr = (char ***)esp;
+        --*dbl_ptr;
+        **dbl_ptr = (char *) NULL;
+        /*addresses initializations*/
+        for(i = argc-1; i >= 0; i--)
+        {
+          --*dbl_ptr;
+          **dbl_ptr = argv[i];
+        } 
+        /*put address of argv itself*/
+        int ptr_temp = *(int *)esp;
+        *int_ptr -= 1;
+        **(uint32_t **)int_ptr = ptr_temp;
+
+
+        /*put value of argc*/
+        *int_ptr -= 1;
+        **(uint32_t **)esp = argc;
+
+        /*fake return address*/
+        *int_ptr -= 1;
+        **(uint32_t **)esp = 0;
+        /*hex dump, check the pita stack*/
+        //hex_dump(*esp,*esp,(size_t)(PHYS_BASE-*esp),true);
+        //hex_dump(pg_round_down(esp),pg_round_down(esp),30,true);
       }
       else
         palloc_free_page (kpage);
