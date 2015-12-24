@@ -96,12 +96,22 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    struct list children;               /*children processes*/
+    struct thread * parent_thread;     /*pointer to the waiting thread for this process to end*/
+    bool is_waited;                     /*parent is waiting for this thread*/
 #endif
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
 
+#ifdef USERPROG
+  /*struct element used to save thread children*/
+  struct process_child_elem{
+    pid_t pid;
+    struct list_elem child_elem;        /*list element to put thread in children list*/
+  };
+#endif /*user prog*/
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
