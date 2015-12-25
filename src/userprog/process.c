@@ -27,10 +27,23 @@
 #define __ARGV_REALLOC_SIZE 10    /*added size when we reallocate argv*/
 
 /*added definitions*/
-
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp, char ** argv, uint32_t argc);
+/*user*/
+void add_process_to_children(struct thread *t, tid_t tid);
+void print_exit_msg(struct thread *t);
+void notify_parent(struct thread * child, struct thread * parent);
 
+
+
+/*  initializes the process code, this function is called in thread_init()
+ to make sure that the processes list is available for wait and exit functions
+*/
+void
+process_init(void)
+{
+  lock_init(&wait_lock);
+}
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -38,6 +51,8 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp, char ** 
 tid_t
 process_execute (const char *file_name) 
 {
+  struct thread * t = thread_current();
+
   char *fn_copy;
   tid_t tid;
 
@@ -50,6 +65,9 @@ process_execute (const char *file_name)
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+
+  add_process_to_children(t,tid);
+
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -99,7 +117,6 @@ start_process (void *file_name_)
   palloc_free_page (file_name);
   if (!success){ 
     thread_exit ();
-    printf("a7eh\n");
   }
 
   /* Start the user process by simulating a return from an
@@ -122,9 +139,38 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  return -1;
+  int ret_value = -1;
+  lock_acquire(&wait_lock);
+  struct list * child_list = &thread_current()->children;
+  struct process_child_elem *child_elem = find_in_list(child_list,struct process_child_elem, child_elem, pid, child_tid);
+  if(child_elem == NULL){
+    /*thread holding pid isn't a child thread of this thread
+    or we called wait on this thread before
+    keep ret value as it is -1
+    */
+  }else{
+    /*first we find this thread*/
+    struct thread * t_chld = get_thread_by_tid(child_tid);
+
+    /*thread has already exited*/
+    if(t_chld == NULL){
+      /*this thread has stored its status*/
+      ret_value = child_elem->status;
+    }
+    else{
+      t_chld->parent_thread = thread_current(); /*set waiting thread*/
+      /*block the current thread waiting for the other thread to finish*/
+      cond_wait(&thread_current()-> wait_cond,&wait_lock);
+      /*we're unblocked here find the return value*/
+      ret_value = child_elem->status;
+    }
+     list_remove(&child_elem->child_elem); /*remove this thread from our children*/
+    free(child_elem); /*free the child elem struct as it's not used now*/
+  }
+  lock_release(&wait_lock);
+  return ret_value;
 }
 
 /* Free the current process's resources. */
@@ -133,6 +179,12 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+  print_exit_msg(cur);  /*print exit message for this thread*/
+
+  struct thread * t = cur->parent_thread;
+  ASSERT(t!=NULL);
+  
+  notify_parent(cur,t);
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -596,4 +648,58 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+void
+thread_init_wait_DS(struct thread * t){
+  list_init(&t->children);    /*initialize thread children list*/
+  t->parent_thread = NULL;    /*save parent thread*/
+  cond_init(&t->wait_cond);   
+  list_init(&t->opened_files);
+  t->fd_counter = 2;          /*0,1 are reserved for STDIN,STDOUT*/
+}
+
+void 
+add_process_to_children(struct thread *t, tid_t tid)
+{
+  lock_acquire(&wait_lock);
+  struct process_child_elem * child_node = (struct process_child_elem *)malloc(sizeof(struct process_child_elem));
+  child_node->pid = tid;
+  child_node->status = -1;
+  list_push_back(&t->children, &child_node->child_elem);
+  struct thread * child_t = get_thread_by_tid(tid);
+  child_t -> parent_thread = t;
+  child_t->child_elem_pntr = child_node;
+  lock_release(&wait_lock);
+}
+
+void
+print_exit_msg(struct thread * t)
+{
+  char * temp_name = (char *) malloc(strlen(t-> name));
+  int i=0;
+  while((t -> name[i] != ' ' && t -> name[i] != '\t') && i < strlen(t->name)){
+    /*get program name only without arguments*/
+    temp_name[i] = t->name [i];
+    temp_name[++i] = 0;
+  }
+
+  /*print termination message*/
+  printf ("%s: exit(%d)\n", temp_name,t->child_elem_pntr->status);
+  
+  /*free the holding pointer as it'll not be used anymore*/
+  free(temp_name);
+}
+
+void 
+notify_parent(struct thread * child, struct thread * parent)
+{
+  lock_acquire(&wait_lock);
+
+  /*get struct from parent list*/
+  struct process_child_elem *child_node = child->child_elem_pntr;
+  /* a thread is waiting for us to exit*/
+  cond_signal(&parent->wait_cond, &wait_lock);
+
+  lock_release(&wait_lock);
 }

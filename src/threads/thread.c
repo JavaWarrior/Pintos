@@ -13,6 +13,7 @@
 #include "threads/vaddr.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "filesys/filesys.h"
 #endif
 
 
@@ -39,6 +40,8 @@ static struct thread *initial_thread;
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
 
+/*lock used to allocate fd*/
+static struct lock fd_lock;
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame 
   {
@@ -94,12 +97,15 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+  lock_init (&fd_lock);
+  process_init();   /*initializes process data structures*/
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -190,6 +196,14 @@ thread_create (const char *name, int priority,
      Do this atomically so intermediate values for the 'stack' 
      member cannot be observed. */
   old_level = intr_disable ();
+
+#ifdef USERPROG
+  /*store current thread child*/
+  struct process_child_elem child_elem ;      /* make an element to represent this child*/
+  child_elem.pid = tid;                 /*set pid of the element of the new thread*/
+  /*push back the new thread to children list*/
+  list_push_back(&thread_current() -> children,&child_elem.child_elem);
+#endif USERPROG
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -293,6 +307,7 @@ thread_exit (void)
   ASSERT (!intr_context ());
 
 #ifdef USERPROG
+  
   process_exit ();
 #endif
 
@@ -474,9 +489,7 @@ init_thread (struct thread *t, const char *name, int priority)
   list_push_back (&all_list, &t->allelem);
 
 #ifdef USERPROG
-  list_init(&t->children);
-  t->parent_thread = NULL;   /*save parent thread*/
-  t->is_waited = false;
+  thread_init_wait_DS(t);
 #endif  /*user prog*/
 }
 
@@ -589,7 +602,39 @@ allocate_tid (void)
 
   return tid;
 }
+/*return the thread which have the corresponding tid*/
+struct thread * 
+get_thread_by_tid(tid_t tid)
+{
+  return find_in_list(&all_list,struct thread, allelem, tid, tid);
+}
+
+int get_new_fd(struct file * fp)
+{
+  int fd;
+  struct file_descriptor * fd_struct = malloc(sizof(struct file_descriptor));
+  fd_struct -> fp = fp;
+
+  lock_acquire(&fd_lock);
+    fd = thread_current()-> fd_counter++;
+    fd_struct->fd = fd;
+    list_push_back(&thread_current()->opened_files, fd_struct->elem);
+  lock_release(&fd_lock);
+  return fd;
+}
+struct file * 
+get_file_fd(int fd)
+{
+  struct file_descriptor * fd_struct find_in_list(thread_current()->opened_files, struct file_descriptor, elem, fd, fd);
+  if(fd_struct != NULL){
+    return fd_struct->fp;
+  }
+  return NULL;
+}
+
+
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
+
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);

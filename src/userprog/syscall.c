@@ -11,28 +11,24 @@
 #include "threads/init.h"
 #include "threads/malloc.h"
 #include "devices/input.h"
+#include "threads/synch.h"
+#include "userprog/process.h"
+#include "userprog/pagedir.h"
 
 /*userprog defines*/
-#define __one_arg_param		*(esp+5)
-#define __two_arg_param		*(esp+5),*(esp+6)
-#define __three_arg_param	*(esp+5),*(esp+6),*(esp+7)
+#define __one_arg_param		*(esp+1)
+#define __two_arg_param		*(esp+1),*(esp+2)
+#define __three_arg_param	*(esp+1),*(esp+2),*(esp+3)
 
 static void syscall_handler (struct intr_frame *);
+static bool test(uint32_t* esp);
+static bool check_pntr(void * pntr);
 
-/* list that stores exit status for every process that exits*/
-static struct list status_list;
 
 
-struct file_descriptor{
-	struct file * 		file_pointer;		/*file which this element represent*/
-	int 				fd;					/*file descriptor for this element*/
-	struct list_elem  	thread_elem;		/*list element to be stored in thread*/
-};
 
-struct status_elem{
-	pid_t pid;					/*pid of the exiting thread*/
-	struct list_elem elem;		/*element for status list*/
-}
+
+struct lock file_lock;						/*lock for file handling as filesystem code isn't concurrent*/
 /* end of definitions*/
 /*-----------------------------------------------------------------------*/
 
@@ -42,7 +38,9 @@ void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
-  list_init(&status_list);
+
+ 
+  lock_init(&file_lock);
 }
 
 static void
@@ -50,10 +48,17 @@ syscall_handler (struct intr_frame *f)
 {
 	//printf ("system call!\n");
 	uint32_t * esp = f->esp;
+	if(esp < 0x08048000  || !test(esp)){	/*stack pointer is invalid*/
+		sys_exit(-1);
+	}
 	uint32_t num = *esp;
+
+	// hex_dump(esp,esp,20,true);
+
 	switch (num){
 		
 		case SYS_EXIT:								/*exit this process*/
+
 		sys_exit(__one_arg_param);
 		break;
 
@@ -68,12 +73,18 @@ syscall_handler (struct intr_frame *f)
 		case SYS_WAIT:								/*wait for child to finish*/
 		f->eax = sys_wait(__one_arg_param);
 
+		case SYS_CREATE:							/*create a file*/
+		f->eax = sys_create(__two_arg_param);
+		break;
+
+
+
 		case SYS_WRITE:
 		f->eax = sys_write(__three_arg_param);
 		break;
 		
 		case SYS_READ:
-		f->eax = syscall_read(__three_arg_param);
+		f->eax = sys_read(__three_arg_param);
 		break;
 		
 
@@ -82,7 +93,7 @@ syscall_handler (struct intr_frame *f)
 }
 
 
-/*turns of pintOS*/
+/*turns off pintOS*/
 void
 sys_halt (void) 
 {
@@ -90,117 +101,161 @@ sys_halt (void)
 	shutdown_power_off();
 }
 
-/*exits the current process and prints exit message*/
+
+/*
+exits the current process and prints exit message
+Terminates the current user program, returning status to the kernel. 
+If the process's parent waits for it (see below), this is the status 
+that will be returned. Conventionally, a status of 0 indicates success
+ and nonzero values indicate errors.
+*/
 void
 sys_exit (int status)
 {
-	struct thread * t = thread_current();
-	char * temp_name = (char *) malloc(strlen(t-> name));
-	int i=0;
-	while(t -> name[i] != ' ' || t -> name[i] != '\t'){
-		/*get program name only without arguments*/
-		temp_name[i] = t->name [i];
-		temp_name[++i] = 0;
-	}
-
-	/*print termination message*/
-	printf ("%s: exit(%d)\n", temp_name,status);
-	
-	/*free the holding pointer as it'll not be used anymore*/
-	free(temp_name);
-
 	/*childs part*/
-	struct status_elem stat;
-	stat.pid = t->tid;							/*save exiting thread tid*/
-	list_push_back(&status_list,&stat.elem);	/*push the element in the status list*/
-
-	if(t->parent_thread != NULL){
-		/* a thread is waiting for us to exit*/
-		thread_unblock(t->parent_thread);
-	}
+	lock_acquire(&wait_lock);
+	thread_current()->child_elem_pntr->status = status;
+	lock_release(&wait_lock);
 	/*exit the thread and free its resources*/
 	thread_exit ();
 }
 
-/*executes command line and return the process id*/
+
+/*
+executes command line and return the process id
+Runs the executable whose name is given in cmd_line, passing any given arguments,
+and returns the new process's program id (pid). Must return pid -1, which otherwise
+should not be a valid pid, if the program cannot load or run for any reason. Thus, 
+the parent process cannot return from the exec until it knows whether the child 
+process successfully loaded its executable. You must use appropriate synchronization
+ to ensure this.
+*/
 pid_t
 sys_exec (const char *file)
 {
-	tid_t ret_value;
-	ret_value =  process_execute(file);
-  	/*check return value*/
-  	if(ret_value == TID_ERROR){
-  		/*if thread was not created return -1*/
-  		return -1;
-  	}else{
-  		/*return thread tid as process pid - one to one mapping*/
-  		struct process_child_elem child_elem ;			/* make an element to represent this child*/
-  		child_elem.pid = ret_value;						/*set pid of the element of the new thread*/
-  			/*push back the new thread to children list*/
-  		list_push_back(&thread_current() -> children,&child_elem.child_elem);
-  		return ret_value;
-  	}
+	/*nothing to be done here*/
+	return process_execute(file);
 }
 
+
+/*waits for process with pid.
+note that process referenced by pid must be a child process
+If pid is still alive, waits until it terminates. Then, returns the status that pid 
+passed to exit. If pid did not call exit(), but was terminated by the kernel 
+(e.g. killed due to an exception), wait(pid) must return -1. 
+It is perfectly legal for a parent process to wait for child processes that have 
+already terminated by the time the parent calls wait, but the kernel must still allow
+ the parent to retrieve its child's exit status, or learn that the child was terminated by the kernel.
+*/
 int
 sys_wait (pid_t pid)
 {
-	if(!is_pid_child(pid)){
-		/*thread holding pid isn't a child thread of this thread*/
-		return -1;
-	}else{
-		/*first we find this thread*/
-		struct thread * t_chld = get_thread_by_tid(pid_t);
-		if(t_chld == NULL){
-			/*child thread already exited*/
-			/*return find_thread_from_status_list*/
-		}
-		if(t_chld->is_waited){
-			/*wait have been called once on this tid*/
-			return -1;
-		}
-		t_chld->is_waited = true;
-		t_chld->parent_thread = thread_current();	/*set waiting thread*/
-		
-		/*block the current thread*/
-		enum intr_level old_level;
-  		old_level = intr_disable ();
-		thread_block();/*block the current thread*/
-		intr_set_level(old_level);
-		/*unblock the current thread*/
- 	}
- return syscall1 (SYS_WAIT, pid);
+	return process_wait(pid);
 }
 
+
+/*
+Creates a new file called file initially initial_size bytes in size. 
+Returns true if successful, false otherwise. Creating a new file does not open it: 
+opening the new file is a separate operation which would require a open system call.
+*/
 bool
 sys_create (const char *file, unsigned initial_size)
 {
-  return syscall2 (SYS_CREATE, file, initial_size);
+	if(!check_pntr(file)){
+		/*do all the necessary checks for this pointer*/
+		sys_exit(-1);
+	}
+	/*filesystem isn't concurrent*/
+	lock_acquire(&file_lock);
+	/*we should do nothing here just return this value*/
+	bool ret_value = filesys_create(file,initial_size);
+	lock_release(&file_lock);
+	return ret_value;
 }
 
+
+/*
+Deletes the file called file. Returns true if successful, false otherwise. 
+A file may be removed regardless of whether it is open or closed,
+ and removing an open file does not close it.
+*/
 bool
 sys_remove (const char *file)
 {
-  return syscall1 (SYS_REMOVE, file);
+	if(!check_pntr(file)){
+		/*do all the necessary checks for this pointer*/
+		sys_exit(-1);
+	}
+	lock_acquire(&file_lock);
+	bool ret_value = filesys_remove(file);
+	lock_release(&file_lock);
+
+	return ret_value;
 }
 
+
+/*
+Opens the file called file. Returns a nonnegative integer handle called a 
+"file descriptor" (fd), or -1 if the file could not be opened.
+File descriptors numbered 0 and 1 are reserved for the console: fd 0 
+(STDIN_FILENO) is standard input, fd 1 (STDOUT_FILENO) is standard output. 
+The open system call will never return either of these file descriptors, 
+which are valid as system call arguments only as explicitly described below.
+
+Each process has an independent set of file descriptors. File descriptors 
+are not inherited by child processes.
+
+When a single file is opened more than once, whether by a single process 
+or different processes, each open returns a new file descriptor. Different 
+file descriptors for a single file are closed independently in separate calls
+to close and they do not share a file position.
+*/
 int
 sys_open (const char *file)
 {
-  return syscall1 (SYS_OPEN, file);
+  	if(!check_pntr(file)){
+		/*do all the necessary checks for this pointer*/
+		sys_exit(-1);
+	}
+	struct file * fp;
+	lock_acquire(&file_lock);
+	fp = file_open(file);							/*open the file*/
+	lock_release(&file_lock);
+	if(fp != NULL){
+		return get_new_fd(fp);						/*if file exists store it in the running thread*/
+	}
+	return -1;
 }
 
+ /*
+ Returns the size, in bytes, of the file open as fd.
+ */
 int
 sys_filesize (int fd) 
 {
-  return syscall1 (SYS_FILESIZE, fd);
+	struct file * fp = get_file_fd(fd);				/*get corresponding file pointer for this file*/
+	if(fp != NULL){
+		return file_length(fp);						/*return file size if it corresponds to a valid fd*/
+	}
+	return 0;
 }
 
 
-/*reads from file to buffer */
+/*
+reads from file to buffer
+Reads size bytes from the file open as fd into buffer. 
+Returns the number of bytes actually read (0 at end of file),
+or -1 if the file could not be read (due to a condition other than end of file). 
+Fd 0 reads from the keyboard using input_getc().
+ */
 int
 sys_read (int fd, void *buffer, unsigned size)
 {	
+	if(!check_pntr(buffer)){
+		/*do all necessary stuff to check the pointer*/
+		sys_exit(-1);
+	}
 	char * str = buffer;
 	int i =0;
 	if(fd == 0){
@@ -232,18 +287,32 @@ sys_write (int fd, const void *buffer, unsigned size)
 void
 sys_seek (int fd, unsigned position) 
 {
-  syscall2 (SYS_SEEK, fd, position);
+  return ;
+  // syscall2 (SYS_SEEK, fd, position);
 }
 
 unsigned
 sys_tell (int fd) 
 {
-  return syscall1 (SYS_TELL, fd);
+return 0;	
+  // return syscall1 (SYS_TELL, fd);
 }
 
 void
 sys_close (int fd)
 {
-  syscall1 (SYS_CLOSE, fd);
+	return ;
+  // syscall1 (SYS_CLOSE, fd);
 }
 
+bool
+test(uint32_t * esp)
+{
+	return is_user_vaddr(*esp) && is_user_vaddr(*(esp+1)) && is_user_vaddr(*(esp+3));
+}
+
+bool
+check_pntr(void * pntr)
+{
+	return pntr != 0 && is_user_vaddr(pntr) && pntr > 0x08048000 && is_valid_pointer(thread_current()->pagedir,pntr);
+}

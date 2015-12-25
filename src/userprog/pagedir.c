@@ -261,3 +261,11 @@ invalidate_pagedir (uint32_t *pd)
       pagedir_activate (pd);
     } 
 }
+
+/*function that checks vaddr pointer in pade pd*/
+bool 
+is_valid_pointer(uint32_t *pd, void * vaddr)
+{
+  return lookup_page(pd, vaddr, false) != NULL;
+}
+

@@ -7,6 +7,7 @@
 typedef tid_t pid_t;						/*one to one mapping between thread id and process id*/
 
 
+
 void syscall_init (void);
 
 /*user added*/
@@ -24,4 +25,5 @@ int 		sys_write (int fd, const void *buffer, unsigned length);
 void 		sys_seek (int fd, unsigned position);
 unsigned 	sys_tell (int fd);
 void 		sys_close (int fd);
+
 #endif /* userprog/syscall.h */

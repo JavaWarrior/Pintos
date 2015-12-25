@@ -5,6 +5,8 @@
 #include <list.h>
 #include <stdint.h>
 
+#include "threads/synch.h"
+
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -97,21 +99,31 @@ struct thread
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
     struct list children;               /*children processes*/
-    struct thread * parent_thread;     /*pointer to the waiting thread for this process to end*/
-    bool is_waited;                     /*parent is waiting for this thread*/
+    struct thread * parent_thread;      /*pointer to the waiting thread for this process to end*/
+    struct condition wait_cond;         /*wait condition for sys_wait */
+    struct list opened_files;           /*opened files by this thread*/
+    int fd_counter;                     /*file descriptor counter for this thread*/
+    struct process_child_elem * child_elem_pntr;  /*holder for status for this thread*/
 #endif
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
-
 #ifdef USERPROG
-  /*struct element used to save thread children*/
-  struct process_child_elem{
-    pid_t pid;
-    struct list_elem child_elem;        /*list element to put thread in children list*/
-  };
-#endif /*user prog*/
+/*struct element used to save thread children*/
+struct process_child_elem{
+  tid_t pid;              /*child thread pid*/
+  int status;             /*child thread return status*/
+  struct list_elem child_elem;        /*list element to put thread in children list*/
+};
+
+struct file_descriptor{
+  struct file *     fp;   /*file which this element represent*/
+  int               fd;             /*file descriptor for this element*/
+  struct list_elem  elem;           /*list element to be stored in thread*/
+};
+#endif
+
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
@@ -148,4 +160,7 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+struct thread * get_thread_by_tid(tid_t tid);
+int get_new_fd(struct file * fp);
+struct file * get_file_fd(int fd);
 #endif /* threads/thread.h */
