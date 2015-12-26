@@ -694,6 +694,17 @@ print_exit_msg(struct thread * t)
   
   /*free the holding pointer as it'll not be used anymore*/
   free(temp_name);
+
+  struct list_elem *e;
+
+
+  for (e = list_begin (&t->opened_files); e != list_end (&t->opened_files);
+       e = list_next (e))
+    {
+      struct file_descriptor *pce = list_entry (e, struct file_descriptor, elem);
+      file_close(pce->fp);
+    }
+
 }
 
 void 
