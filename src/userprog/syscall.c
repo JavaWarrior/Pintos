@@ -443,7 +443,7 @@ sys_close (int fd)
 bool
 test(uint32_t * esp)
 {
-	if(is_user_vaddr(esp))
+	if(is_user_vaddr(esp) && is_valid_pointer(thread_current()->pagedir, esp))
 		return  is_user_vaddr(*esp) && is_user_vaddr(*(esp+1)) && is_user_vaddr(*(esp+2));
 	return false;
 }
