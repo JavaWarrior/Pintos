@@ -161,6 +161,19 @@ kernel much more complex and bigger which is not good.
 >> B5: Briefly describe your implementation of the "wait" system call
 >> and how it interacts with process termination.
 
+	- when any process creates a child, function add_process_to_children()
+	which in turn allocates a process_child_elem struct and save it in 
+	the parent thread with the exit status uninitialized and the pid of
+	the child thread. and the child parent is save in the child thread.
+
+	- when process wait is called, the parent thread checks if that this
+	thread is a child and if it hasn't called wait on it before. then it waits
+	for the child thread to signal it on its wait_cond.
+
+	- when the child approaches process_exit() it signals parent wait_cond. which
+	which allows the thread to continue its operation and then remove the child
+	thread from its list so that it won't wait it again.
+
 >> B6: Any access to user program memory at a user-specified address
 >> can fail due to a bad pointer value.  Such accesses must cause the
 >> process to be terminated.  System calls are fraught with such
@@ -175,12 +188,31 @@ kernel much more complex and bigger which is not good.
 >> paragraphs, describe the strategy or strategies you adopted for
 >> managing these issues.  Give an example.
 
+	- most of the allocated data is allocated after pointer checks, by that 
+	we guarantee that no resources are not freed.
+
+	- also we took advantage of the fact that most of the pointers lies in the
+	first of the second argument so we made checks on that before any system calls
+	are made.
+
+	- for example take sys_write, it first checks the address of the buffer so now
+	we are sure that this address is valid and we can access it. then it checks the
+	file descriptor to see if it's valid if it's invalid it returns once again
+	no resources is allocated until the proper checks is made.
+
 ---- SYNCHRONIZATION ----
 
 >> B7: The "exec" system call returns -1 if loading the new executable
 >> fails, so it cannot return before the new executable has completed
 >> loading.  How does your code ensure this?  How is the load
 >> success/failure status passed back to the thread that calls "exec"?
+
+	- first I don't wait for load to tell me if the file is valid I check it in
+	the beginning of the function to avoid unnecessary allocations.
+
+	- the default value for exit status for any thread is -1 so when load 
+	fails it calls thread_exit() which then calls process_exit() which finds 
+	that the status is still -1 and then prints this status.
 
 >> B8: Consider parent process P with child process C.  How do you
 >> ensure proper synchronization and avoid race conditions when P
@@ -189,16 +221,47 @@ kernel much more complex and bigger which is not good.
 >> terminates without waiting, before C exits?  After C exits?  Are
 >> there any special cases?
 
+	= P waits for C:
+	- before C exit: 
+		| when P calls process wait it will still find child's in its 
+		| children list so then it will call cond_wait and wait until
+		| process C finishes.
+	
+	- after C exit:
+		| when C exits it will save its status in the parent child list.
+		| then when the parent waits it it will find that C exited and it
+		| will look it in the list and find its status.
+
+	- in those cases after P waits it frees the entry of C in its list and
+	frees its linking pointers.
+
+	= P terminates and don't wait C:
+	- before C exits:
+		| P will remove C entry from the list and then C will find that and will
+		| free its entry.
+
+	- after C exits:
+		| P will find that C exited and stored its status, then it will free its entry
+		| in the list.
+
 ---- RATIONALE ----
 
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
+	- easier to debug and increase readability, also faster to implement.
+
 
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
+	- advantages is maintains a free-of-race implementation also ensures that 
+	every file has its unique fd.
+
+	- I don't find ant disadvantages for now.
 
 >> B11: The default tid_t to pid_t mapping is the identity mapping.
 >> If you changed it, what advantages are there to your approach?
+	- I didn't change it, no need to make it more complex just make tid = pid.
+	as tid is always unique.
 
 			   SURVEY QUESTIONS
 			   ================
@@ -211,6 +274,12 @@ the quarter.
 
 >> In your opinion, was this assignment, or any one of the three problems
 >> in it, too easy or too hard?  Did it take too long or too little time?
+	
+	- this assignment wasn't too hard to code but hard to understand, many
+	concepts are vague and not clear.
+
+	- also the code coupling is too low and cohesion is too high. debugging 
+	one issue in your code makes you open 15-10 files at once to get the bug.
 
 >> Did you find that working on a particular part of the assignment gave
 >> you greater insight into some aspect of OS design?

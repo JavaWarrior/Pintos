@@ -1,5 +1,8 @@
 cd build && make check
 make[1]: Entering directory `/home/mohamed/Desktop/pintos/src/userprog/build'
+gcc -m32 -c ../../userprog/syscall.c -o userprog/syscall.o -g -msoft-float -O0 -fno-stack-protector -nostdinc -I../.. -I../../lib -I../../lib/kernel -Wall -W -Wstrict-prototypes -Wmissing-prototypes -Wsystem-headers -DUSERPROG -DFILESYS -MMD -MF userprog/syscall.d
+ld -melf_i386 -T threads/kernel.lds.s -o kernel.o threads/start.o threads/init.o threads/thread.o threads/switch.o threads/interrupt.o threads/intr-stubs.o threads/synch.o threads/palloc.o threads/malloc.o devices/pit.o devices/timer.o devices/kbd.o devices/vga.o devices/serial.o devices/block.o devices/partition.o devices/ide.o devices/input.o devices/intq.o devices/rtc.o devices/shutdown.o devices/speaker.o lib/debug.o lib/random.o lib/stdio.o lib/stdlib.o lib/string.o lib/arithmetic.o lib/ustar.o lib/kernel/debug.o lib/kernel/list.o lib/kernel/bitmap.o lib/kernel/hash.o lib/kernel/console.o userprog/process.o userprog/pagedir.o userprog/exception.o userprog/syscall.o userprog/gdt.o userprog/tss.o filesys/filesys.o filesys/free-map.o filesys/file.o filesys/directory.o filesys/inode.o filesys/fsutil.o
+objcopy -R .note -R .comment -S kernel.o kernel.bin
 pintos -v -k -T 60 --bochs  --filesys-size=2 -p tests/userprog/args-none -a args-none -- -q  -f run args-none < /dev/null 2> tests/userprog/args-none.errors > tests/userprog/args-none.output
 perl -I../.. ../../tests/userprog/args-none.ck tests/userprog/args-none tests/userprog/args-none.result
 pass tests/userprog/args-none
@@ -149,27 +152,7 @@ perl -I../.. ../../tests/userprog/wait-twice.ck tests/userprog/wait-twice tests/
 pass tests/userprog/wait-twice
 pintos -v -k -T 60 --bochs  --filesys-size=2 -p tests/userprog/wait-killed -a wait-killed -p tests/userprog/child-bad -a child-bad -- -q  -f run wait-killed < /dev/null 2> tests/userprog/wait-killed.errors > tests/userprog/wait-killed.output
 perl -I../.. ../../tests/userprog/wait-killed.ck tests/userprog/wait-killed tests/userprog/wait-killed.result
-FAIL tests/userprog/wait-killed
-Kernel panic in run: PANIC at ../../userprog/exception.c:100 in kill(): Kernel bug - unexpected interrupt in kernel
-Call stack: 0xc002a3a5 0xc002e47d 0xc002e57b 0xc0022038 0xc0022295 0xc002eca8 0xc002e607 0xc0022038 0xc0022295 0x80480a1 0x80480dd 0x80487d3
-Translation of call stack:
-In kernel.o:
-0xc002a3a5: debug_panic (.../../lib/kernel/debug.c:38)
-0xc002e47d: kill (.../userprog/exception.c:106)
-0xc002e57b: page_fault (...n.c:160 (discriminator 9))
-0xc0022038: intr_handler (..../threads/interrupt.c:367)
-0xc0022295: intr_entry (threads/intr-stubs.S:38)
-0xc002eca8: test (...../userprog/syscall.c:447)
-0xc002e607: syscall_handler (...ll.c:57 (discriminator 1))
-0xc0022038: intr_handler (..../threads/interrupt.c:367)
-0xc0022295: intr_entry (threads/intr-stubs.S:38)
-In tests/userprog/wait-killed:
-0x080480a1: test_main (...userprog/wait-killed.c:10)
-0x080480dd: main (...ild/../../tests/main.c:10)
-0x080487d3: _start (.../../../lib/user/entry.c:8)
-Translations of user virtual addresses above are based on a guess at
-the binary to use.  If this guess is incorrect, then those
-translations will be misleading.
+pass tests/userprog/wait-killed
 pintos -v -k -T 60 --bochs  --filesys-size=2 -p tests/userprog/wait-bad-pid -a wait-bad-pid -- -q  -f run wait-bad-pid < /dev/null 2> tests/userprog/wait-bad-pid.errors > tests/userprog/wait-bad-pid.output
 perl -I../.. ../../tests/userprog/wait-bad-pid.ck tests/userprog/wait-bad-pid tests/userprog/wait-bad-pid.result
 pass tests/userprog/wait-bad-pid
@@ -246,7 +229,7 @@ pass tests/filesys/base/sm-seq-random
 pintos -v -k -T 300 --bochs  --filesys-size=2 -p tests/filesys/base/syn-read -a syn-read -p tests/filesys/base/child-syn-read -a child-syn-read -- -q  -f run syn-read < /dev/null 2> tests/filesys/base/syn-read.errors > tests/filesys/base/syn-read.output
 perl -I../.. ../../tests/filesys/base/syn-read.ck tests/filesys/base/syn-read tests/filesys/base/syn-read.result
 FAIL tests/filesys/base/syn-read
-run: wait for child 3 of 10 returned -1 (expected 2): FAILED
+run: wait for child 2 of 10 returned -1 (expected 1): FAILED
 pintos -v -k -T 60 --bochs  --filesys-size=2 -p tests/filesys/base/syn-remove -a syn-remove -- -q  -f run syn-remove < /dev/null 2> tests/filesys/base/syn-remove.errors > tests/filesys/base/syn-remove.output
 perl -I../.. ../../tests/filesys/base/syn-remove.ck tests/filesys/base/syn-remove tests/filesys/base/syn-remove.result
 pass tests/filesys/base/syn-remove
@@ -325,7 +308,7 @@ pass tests/userprog/exec-missing
 pass tests/userprog/exec-bad-ptr
 pass tests/userprog/wait-simple
 pass tests/userprog/wait-twice
-FAIL tests/userprog/wait-killed
+pass tests/userprog/wait-killed
 pass tests/userprog/wait-bad-pid
 pass tests/userprog/multi-recurse
 pass tests/userprog/multi-child-fd
@@ -352,5 +335,5 @@ pass tests/filesys/base/sm-seq-random
 FAIL tests/filesys/base/syn-read
 pass tests/filesys/base/syn-remove
 FAIL tests/filesys/base/syn-write
-7 of 76 tests failed.
+6 of 76 tests failed.
 make[1]: Leaving directory `/home/mohamed/Desktop/pintos/src/userprog/build'

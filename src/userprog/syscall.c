@@ -420,6 +420,7 @@ sys_tell (int fd)
 	lock_release(&file_lock);
 }
 
+/*closes a file */
 void
 sys_close (int fd)
 {
@@ -440,6 +441,8 @@ sys_close (int fd)
 
 }
 
+
+/*tests stack pointer to see if it's valid*/
 bool
 test(uint32_t * esp)
 {
@@ -448,6 +451,10 @@ test(uint32_t * esp)
 	return false;
 }
 
+
+/*
+	tests any given pointer in a system call to make sure it's not a bad ptr
+*/
 bool
 check_pntr(void * pntr)
 {
@@ -468,6 +475,8 @@ check_executable(char * str){
 	return true;
 }
 
+
+/*increase process counter*/
 void 
 inc_process_cnt(void)
 {
@@ -476,6 +485,8 @@ inc_process_cnt(void)
 	lock_release(&cnt_lock);
 }
 
+
+/*decrease process counter*/
 void 
 dec_process_cnt(void)
 {
@@ -484,6 +495,8 @@ dec_process_cnt(void)
 	lock_release(&cnt_lock);
 }
 
+
+/*return value of process counter*/
 int
 get_process_cnt(void)
 {
