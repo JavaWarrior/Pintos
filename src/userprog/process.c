@@ -35,8 +35,8 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp, char ** 
 void add_process_to_children(struct thread *t, tid_t tid);
 void print_exit_msg(struct thread *t);
 void notify_parent(struct thread * child, struct thread * parent);
-
-
+void free_resources(struct thread * t);
+char * get_file_name(char * str);
 
 /*  initializes the process code, this function is called in thread_init()
  to make sure that the processes list is available for wait and exit functions
@@ -146,8 +146,7 @@ process_wait (tid_t child_tid)
 {
   int ret_value = -1;
   lock_acquire(&wait_lock);
-  struct list * child_list = &thread_current()->children;
-  struct process_child_elem *child_elem = find_in_list(child_list,struct process_child_elem, child_elem, pid, child_tid);
+  struct process_child_elem * child_elem = find_child(child_tid);
   if(child_elem == NULL){
     /*thread holding pid isn't a child thread of this thread
     or we called wait on this thread before
@@ -161,10 +160,9 @@ process_wait (tid_t child_tid)
     if(t_chld == NULL){
       /*this thread has stored its status*/
       ret_value = child_elem->status;
+
     }
     else{
-
-      t_chld->parent_thread = thread_current(); /*set waiting thread*/
       /*block the current thread waiting for the other thread to finish*/
       cond_wait(&thread_current()-> wait_cond,&wait_lock);
       /*we're unblocked here find the return value*/
@@ -173,6 +171,7 @@ process_wait (tid_t child_tid)
     }
     list_remove(&child_elem->child_elem); /*remove this thread from our children*/
     free(child_elem); /*free the child elem struct as it's not used now*/
+    t_chld->child_elem_pntr = NULL;
   }
   lock_release(&wait_lock);
   return ret_value;
@@ -186,10 +185,8 @@ process_exit (void)
   uint32_t *pd;
 
   struct thread * t = cur->parent_thread;
-  ASSERT(t!=NULL);
-
-  notify_parent(cur,t);
   print_exit_msg(cur);  /*print exit message for this thread*/
+  free_resources(cur); 
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -207,6 +204,11 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+
+  if(t != NULL){
+    notify_parent(cur,t);
+  }
+
 }
 
 /* Sets up the CPU for running user code in the current
@@ -321,6 +323,8 @@ load (const char *file_name, void (**eip) (void), void **esp, char ** argv, uint
       printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
+  /*ensuring file exec cannot be modified */
+    file_deny_write(file);
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -662,12 +666,13 @@ thread_init_wait_DS(struct thread * t){
   cond_init(&t->wait_cond);   
   list_init(&t->opened_files);
   t->fd_counter = 2;          /*0,1 are reserved for STDIN,STDOUT*/
+  t->child_elem_pntr = NULL;
 }
 
 void 
 add_process_to_children(struct thread *t, tid_t tid)
 {
-  //lock_acquire(&wait_lock);
+  lock_acquire(&wait_lock);
   struct process_child_elem * child_node = (struct process_child_elem *)malloc(sizeof(struct process_child_elem));
   child_node->pid = tid;
   child_node->status = -1;
@@ -675,36 +680,19 @@ add_process_to_children(struct thread *t, tid_t tid)
   struct thread * child_t = get_thread_by_tid(tid);
   child_t -> parent_thread = t;
   child_t->child_elem_pntr = child_node;
-  //lock_release(&wait_lock);
+  lock_release(&wait_lock);
 }
 
 void
 print_exit_msg(struct thread * t)
 {
-  char * temp_name = (char *) malloc(strlen(t-> name));
-  int i=0;
-  while((t -> name[i] != ' ' && t -> name[i] != '\t') && i < strlen(t->name)){
-    /*get program name only without arguments*/
-    temp_name[i] = t->name [i];
-    temp_name[++i] = 0;
-  }
+  char * temp_name = get_file_name(t->name);
 
   /*print termination message*/
   printf ("%s: exit(%d)\n", temp_name,t->child_elem_pntr->status);
   
   /*free the holding pointer as it'll not be used anymore*/
   free(temp_name);
-
-  struct list_elem *e;
-
-
-  for (e = list_begin (&t->opened_files); e != list_end (&t->opened_files);
-       e = list_next (e))
-    {
-      struct file_descriptor *pce = list_entry (e, struct file_descriptor, elem);
-      file_close(pce->fp);
-    }
-
 }
 
 void 
@@ -718,4 +706,53 @@ notify_parent(struct thread * child, struct thread * parent)
   cond_signal(&parent->wait_cond, &wait_lock);
 
   lock_release(&wait_lock);
+}
+
+struct process_child_elem * 
+find_child(int child_tid)
+{
+  struct list * child_list = &thread_current()->children;
+  struct process_child_elem *child_elem_ref ;
+  struct list_elem *e;                                                            
+  for (e = list_begin (child_list); e != list_end (child_list); e = list_next (e))    
+  {                                                                               
+    child_elem_ref  = list_entry (e, struct process_child_elem, child_elem);                                 
+    if(child_elem_ref -> pid == child_tid){                                                
+      return child_elem_ref;
+    }                                                      
+  }                                                                               
+  return NULL;
+}
+
+void
+free_resources(struct thread * t)
+{
+  if(t < 0x08048000){
+    return;
+  }
+  struct list_elem *e;
+  for (e = list_begin (&t->opened_files); e != list_end (&t->opened_files);
+       e = list_next (e))
+  {
+    struct file_descriptor *pce = list_entry (e, struct file_descriptor, elem);
+    lock_acquire(&file_lock);
+    file_close(pce->fp);
+    lock_release(&file_lock);
+  }
+  lock_acquire(&wait_lock);
+  /* if parent didn't exit yet*/
+  //need to be fixed
+
+  lock_release(&wait_lock);
+}
+
+char * get_file_name(char * str){
+  char * temp_name = (char *) malloc(strlen(str));
+  int i=0;
+  while((str[i] != ' ' && str[i] != '\t') && i < strlen(str)){
+    /*get program name only without arguments*/
+    temp_name[i] = str [i];
+    temp_name[++i] = 0;
+  }
+  return temp_name;
 }

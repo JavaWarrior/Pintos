@@ -198,11 +198,7 @@ thread_create (const char *name, int priority,
   old_level = intr_disable ();
 
 #ifdef USERPROG
-  /*store current thread child*/
-  struct process_child_elem child_elem ;      /* make an element to represent this child*/
-  child_elem.pid = tid;                 /*set pid of the element of the new thread*/
-  /*push back the new thread to children list*/
-  list_push_back(&thread_current() -> children,&child_elem.child_elem);
+ 
 #endif
 
   /* Stack frame for kernel_thread(). */

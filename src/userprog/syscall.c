@@ -23,13 +23,17 @@
 static void syscall_handler (struct intr_frame *);
 static bool test(uint32_t* esp);
 static bool check_pntr(void * pntr);
+static bool check_executable(char * str);
+
+void inc_process_cnt(void);
+void dec_process_cnt(void);
+int get_process_cnt(void);
 
 
 
-
-
-struct lock file_lock;						/*lock for file handling as filesystem code isn't concurrent*/
 struct lock std_lock;						/*lock for writing to stdout or reading from stdin*/
+struct lock cnt_lock;
+int process_cnt = 0;
 /* end of definitions*/
 /*-----------------------------------------------------------------------*/
 
@@ -42,6 +46,7 @@ syscall_init (void)
  
   lock_init(&file_lock);
   lock_init(&std_lock);
+  lock_init(&cnt_lock);
 }
 
 static void
@@ -72,6 +77,7 @@ syscall_handler (struct intr_frame *f)
 
 		case SYS_WAIT:								/*wait for child to finish*/
 		f->eax = sys_wait(__one_arg_param);
+		break;
 
 		case SYS_CREATE:							/*create a file*/
 		f->eax = sys_create(__two_arg_param);
@@ -120,6 +126,10 @@ syscall_handler (struct intr_frame *f)
 void
 sys_halt (void) 
 {
+	// while(get_process_cnt() > 0)
+	// {
+	// 	thread_yield();
+	// }
 	lock_acquire(&wait_lock);
 	/*shutdown pintos*/
 	shutdown_power_off();
@@ -142,6 +152,7 @@ sys_exit (int status)
 	thread_current()->child_elem_pntr->status = status;
 	lock_release(&wait_lock);
 	/*exit the thread and free its resources*/
+	dec_process_cnt();
 	thread_exit ();
 }
 
@@ -161,6 +172,10 @@ sys_exec (const char *file)
 	if(!check_pntr(file)){
 		sys_exit(-1);
 	}
+	if(!check_executable(file)){
+		return -1;
+	}
+	inc_process_cnt();
 	/*nothing to be done here*/
 	return process_execute(file);
 }
@@ -428,11 +443,53 @@ sys_close (int fd)
 bool
 test(uint32_t * esp)
 {
-	return is_user_vaddr(*esp) && is_user_vaddr(*(esp+1)) && is_user_vaddr(*(esp+3));
+	if(is_user_vaddr(esp))
+		return  is_user_vaddr(*esp) && is_user_vaddr(*(esp+1)) && is_user_vaddr(*(esp+2));
+	return false;
 }
 
 bool
 check_pntr(void * pntr)
 {
 	return pntr != 0 && is_user_vaddr(pntr) && pntr > 0x08048000 && is_valid_pointer(thread_current()->pagedir,pntr);
+}
+bool
+check_executable(char * str){
+	str = get_file_name(str);
+	lock_acquire(&file_lock);
+	struct  file * fp = filesys_open(str);
+	lock_release(&file_lock);
+	if(fp == NULL)
+		return false;
+
+	lock_acquire(&file_lock);
+	file_close(fp);
+	lock_release(&file_lock);
+	return true;
+}
+
+void 
+inc_process_cnt(void)
+{
+	lock_acquire(&cnt_lock);
+	process_cnt++;
+	lock_release(&cnt_lock);
+}
+
+void 
+dec_process_cnt(void)
+{
+	lock_acquire(&cnt_lock);
+	process_cnt--;
+	lock_release(&cnt_lock);
+}
+
+int
+get_process_cnt(void)
+{
+	int ret_value;
+	lock_acquire(&cnt_lock);
+	ret_value = process_cnt++;
+	lock_release(&cnt_lock);
+	return ret_value;
 }
