@@ -29,6 +29,8 @@
 /*added definitions*/
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp, char ** argv, uint32_t argc);
+
+
 /*user*/
 void add_process_to_children(struct thread *t, tid_t tid);
 void print_exit_msg(struct thread *t);
@@ -43,6 +45,7 @@ void
 process_init(void)
 {
   lock_init(&wait_lock);
+  sema_init(&creat_sema,0);
 }
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -65,7 +68,7 @@ process_execute (const char *file_name)
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-
+  sema_down(&creat_sema);
   add_process_to_children(t,tid);
 
   if (tid == TID_ERROR)
@@ -112,13 +115,13 @@ start_process (void *file_name_)
 
 
   success = load (file_name, &if_.eip, &if_.esp,argv,argv_indx);
+  sema_up(&creat_sema);
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success){ 
     thread_exit ();
   }
-
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -160,13 +163,15 @@ process_wait (tid_t child_tid)
       ret_value = child_elem->status;
     }
     else{
+
       t_chld->parent_thread = thread_current(); /*set waiting thread*/
       /*block the current thread waiting for the other thread to finish*/
       cond_wait(&thread_current()-> wait_cond,&wait_lock);
       /*we're unblocked here find the return value*/
       ret_value = child_elem->status;
+
     }
-     list_remove(&child_elem->child_elem); /*remove this thread from our children*/
+    list_remove(&child_elem->child_elem); /*remove this thread from our children*/
     free(child_elem); /*free the child elem struct as it's not used now*/
   }
   lock_release(&wait_lock);
@@ -179,12 +184,12 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
-  print_exit_msg(cur);  /*print exit message for this thread*/
 
   struct thread * t = cur->parent_thread;
   ASSERT(t!=NULL);
-  
+
   notify_parent(cur,t);
+  print_exit_msg(cur);  /*print exit message for this thread*/
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -662,7 +667,7 @@ thread_init_wait_DS(struct thread * t){
 void 
 add_process_to_children(struct thread *t, tid_t tid)
 {
-  lock_acquire(&wait_lock);
+  //lock_acquire(&wait_lock);
   struct process_child_elem * child_node = (struct process_child_elem *)malloc(sizeof(struct process_child_elem));
   child_node->pid = tid;
   child_node->status = -1;
@@ -670,7 +675,7 @@ add_process_to_children(struct thread *t, tid_t tid)
   struct thread * child_t = get_thread_by_tid(tid);
   child_t -> parent_thread = t;
   child_t->child_elem_pntr = child_node;
-  lock_release(&wait_lock);
+  //lock_release(&wait_lock);
 }
 
 void

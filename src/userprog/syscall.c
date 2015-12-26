@@ -29,6 +29,7 @@ static bool check_pntr(void * pntr);
 
 
 struct lock file_lock;						/*lock for file handling as filesystem code isn't concurrent*/
+struct lock std_lock;						/*lock for writing to stdout or reading from stdin*/
 /* end of definitions*/
 /*-----------------------------------------------------------------------*/
 
@@ -38,9 +39,9 @@ void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
-
  
   lock_init(&file_lock);
+  lock_init(&std_lock);
 }
 
 static void
@@ -58,7 +59,6 @@ syscall_handler (struct intr_frame *f)
 	switch (num){
 		
 		case SYS_EXIT:								/*exit this process*/
-
 		sys_exit(__one_arg_param);
 		break;
 
@@ -77,17 +77,40 @@ syscall_handler (struct intr_frame *f)
 		f->eax = sys_create(__two_arg_param);
 		break;
 
-
-
-		case SYS_WRITE:
-		f->eax = sys_write(__three_arg_param);
+		case SYS_REMOVE:							/*remove a file*/
+		f->eax = sys_remove(__one_arg_param);
 		break;
-		
-		case SYS_READ:
+
+		case SYS_OPEN:								/*opens a file*/
+		f->eax = sys_open(__one_arg_param);
+		break;
+
+		case SYS_FILESIZE:							/*returns file size*/
+		f->eax = sys_filesize(__one_arg_param);
+		break;
+
+		case SYS_READ:								/*reads from file to buffer*/
 		f->eax = sys_read(__three_arg_param);
 		break;
 		
+		case SYS_WRITE:								/*writes from buffer to file*/
+		f->eax = sys_write(__three_arg_param);
+		break;
+		
+		case  SYS_SEEK:								/*seek file to specific position*/
+		sys_seek(__two_arg_param);
+		break;
 
+		case SYS_TELL:								/*tell position of the file*/
+		f->eax = sys_tell(__one_arg_param);
+		break;
+
+		case SYS_CLOSE:								/*close file*/
+		sys_close(__one_arg_param);
+		break;
+
+		default:
+		NOT_REACHED();
 	}
 	//thread_exit ();
 }
@@ -97,8 +120,10 @@ syscall_handler (struct intr_frame *f)
 void
 sys_halt (void) 
 {
+	lock_acquire(&wait_lock);
 	/*shutdown pintos*/
 	shutdown_power_off();
+	lock_release(&wait_lock);
 }
 
 
@@ -133,6 +158,9 @@ process successfully loaded its executable. You must use appropriate synchroniza
 pid_t
 sys_exec (const char *file)
 {
+	if(!check_pntr(file)){
+		sys_exit(-1);
+	}
 	/*nothing to be done here*/
 	return process_execute(file);
 }
@@ -220,7 +248,7 @@ sys_open (const char *file)
 	}
 	struct file * fp;
 	lock_acquire(&file_lock);
-	fp = file_open(file);							/*open the file*/
+	fp = filesys_open(file);						/*open the file*/
 	lock_release(&file_lock);
 	if(fp != NULL){
 		return get_new_fd(fp);						/*if file exists store it in the running thread*/
@@ -234,7 +262,7 @@ sys_open (const char *file)
 int
 sys_filesize (int fd) 
 {
-	struct file * fp = get_file_fd(fd);				/*get corresponding file pointer for this file*/
+	struct file * fp = get_file_by_fd(fd);				/*get corresponding file pointer for this file*/
 	if(fp != NULL){
 		return file_length(fp);						/*return file size if it corresponds to a valid fd*/
 	}
@@ -256,53 +284,145 @@ sys_read (int fd, void *buffer, unsigned size)
 		/*do all necessary stuff to check the pointer*/
 		sys_exit(-1);
 	}
+
+	int32_t ret_size = size;
+
 	char * str = buffer;
 	int i =0;
 	if(fd == 0){
+  		lock_acquire(&std_lock);
 		for(;i<size;i++){
-			str[i] = input_getc();
+			str[i] = input_getc();	/*no need here to count because it will wait until it gets the key*/
 		}
+  		lock_release(&std_lock);
 	}else if (fd == 1){
 		/*we should not take anything from stdout*/
+		ret_size = 0;
 	}else{
 		/*read from file with descriptor fd*/
+		struct file * fp = get_file_by_fd(fd);
+		if(fp == NULL){
+			/*wrong fd*/
+			sys_exit(-1);
+		}
+		lock_acquire(&file_lock);
+		ret_size = file_read(fp, buffer, size);
+		lock_release(&file_lock);
 	}
-  	return size;
+  	return ret_size;
 }
 
+
+/*
+Writes size bytes from buffer to the open file fd. Returns the number of bytes actually written, 
+which may be less than size if some bytes could not be written.
+Fd 1 writes to the console.
+*/
 int
 sys_write (int fd, const void *buffer, unsigned size)
 {
+	if(!check_pntr(buffer)){
+		/*do all necessary stuff to check the pointer*/
+		sys_exit(-1);
+	}
+
+	int32_t ret_size = size;
+  	
   	if(fd == 1){
+  		lock_acquire(&std_lock);
 		putbuf(buffer,size);
+  		lock_release(&std_lock);
+
 	}else if(fd == 0){
 		/*do nothing we should not print in stin*/
+		ret_size = 0;
 	}else{
 		/*write to file with descriptor fd*/
+		struct file * fp = get_file_by_fd(fd);
+		if(fp == NULL){
+			/*wrong fd*/
+			sys_exit(-1);
+		}
+		lock_acquire(&file_lock);
+		ret_size = file_write(fp, buffer, size);
+		lock_release(&file_lock);
 
 	}
-	return  size;
+	return  ret_size;
 }
 
+
+/*
+Changes the next byte to be read or written in open file fd to position, 
+expressed in bytes from the beginning of the file. 
+(Thus, a position of 0 is the file's start.)
+A seek past the current end of a file is not an error. A later read obtains 
+0 bytes, indicating end of file. A later write extends the file, 
+filling any unwritten gap with zeros. (However, in Pintos files have a fixed 
+length until project 4 is complete, so writes past end of file will return 
+an error.) These semantics are implemented in the file system and do not 
+require any special effort in system call implementation.
+*/
 void
 sys_seek (int fd, unsigned position) 
 {
-  return ;
-  // syscall2 (SYS_SEEK, fd, position);
+	if(fd <= 1){
+		/*make sure it's not STDIN or STDOUT*/
+		sys_exit(-1);
+	}
+  	/*seek file with descriptor fd*/
+	struct file * fp = get_file_by_fd(fd);
+	if(fp == NULL){
+		/*wrong fd*/
+		return ;
+	}
+	lock_acquire(&file_lock);
+	file_seek(fp, position);
+	lock_release(&file_lock);
 }
 
+
+/*
+Returns the position of the next byte to be read or written in open file fd,
+expressed in bytes from the beginning of the file.
+*/
 unsigned
 sys_tell (int fd) 
 {
-return 0;	
-  // return syscall1 (SYS_TELL, fd);
+	if(fd <= 1){
+		/*make sure it's not STDIN or STDOUT*/
+		sys_exit(-1);
+	}
+
+  	/*tell file position with descriptor fd*/
+	struct file * fp = get_file_by_fd(fd);
+	if(fp == NULL){
+		/*wrong fd*/
+		return 0;
+	}
+	lock_acquire(&file_lock);
+	file_tell(fp);
+	lock_release(&file_lock);
 }
 
 void
 sys_close (int fd)
 {
-	return ;
-  // syscall1 (SYS_CLOSE, fd);
+	if(fd <= 1){
+		/*make sure it's not STDIN or STDOUT*/
+		sys_exit(-1);
+	}
+	
+	/*remove file from our open files*/
+	struct file * fp = file_close_pop(fd);
+	if(fp == NULL){
+		/*wrong fd*/
+		return ;
+	}
+	lock_acquire(&file_lock);
+	file_close(fp);
+	lock_release(&file_lock);
+
 }
 
 bool

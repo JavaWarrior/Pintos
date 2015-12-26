@@ -203,7 +203,7 @@ thread_create (const char *name, int priority,
   child_elem.pid = tid;                 /*set pid of the element of the new thread*/
   /*push back the new thread to children list*/
   list_push_back(&thread_current() -> children,&child_elem.child_elem);
-#endif USERPROG
+#endif
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -612,24 +612,39 @@ get_thread_by_tid(tid_t tid)
 int get_new_fd(struct file * fp)
 {
   int fd;
-  struct file_descriptor * fd_struct = malloc(sizof(struct file_descriptor));
+  struct file_descriptor * fd_struct = malloc(sizeof(struct file_descriptor));
   fd_struct -> fp = fp;
-
   lock_acquire(&fd_lock);
     fd = thread_current()-> fd_counter++;
     fd_struct->fd = fd;
-    list_push_back(&thread_current()->opened_files, fd_struct->elem);
+    list_push_back(&thread_current()->opened_files, &fd_struct->elem);
   lock_release(&fd_lock);
   return fd;
 }
 struct file * 
-get_file_fd(int fd)
+get_file_by_fd(int fd)
 {
-  struct file_descriptor * fd_struct find_in_list(thread_current()->opened_files, struct file_descriptor, elem, fd, fd);
+  struct file * ret_value = NULL;
+  lock_acquire(&fd_lock);
+  struct file_descriptor * fd_struct = find_in_list(&thread_current()->opened_files, struct file_descriptor, elem, fd, fd);
   if(fd_struct != NULL){
-    return fd_struct->fp;
+    ret_value =  fd_struct->fp;
   }
-  return NULL;
+  lock_release(&fd_lock);
+  return ret_value;
+}
+struct file * 
+file_close_pop(int fd)
+{
+  struct file * ret_value = NULL;
+  lock_acquire(&fd_lock);
+  struct file_descriptor * fd_struct = find_in_list(&thread_current()->opened_files, struct file_descriptor, elem, fd, fd);
+  if(fd_struct != NULL){
+    list_remove(&fd_struct->elem);
+    ret_value =  fd_struct->fp;
+  }
+  lock_release(&fd_lock);
+  return ret_value;
 }
 
 

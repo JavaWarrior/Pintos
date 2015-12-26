@@ -104,6 +104,7 @@ struct thread
     struct list opened_files;           /*opened files by this thread*/
     int fd_counter;                     /*file descriptor counter for this thread*/
     struct process_child_elem * child_elem_pntr;  /*holder for status for this thread*/
+    struct semaphore wait_sema;
 #endif
 
     /* Owned by thread.c. */
@@ -118,7 +119,7 @@ struct process_child_elem{
 };
 
 struct file_descriptor{
-  struct file *     fp;   /*file which this element represent*/
+  struct file *     fp;             /*file which this element represent*/
   int               fd;             /*file descriptor for this element*/
   struct list_elem  elem;           /*list element to be stored in thread*/
 };
@@ -162,5 +163,6 @@ int thread_get_load_avg (void);
 
 struct thread * get_thread_by_tid(tid_t tid);
 int get_new_fd(struct file * fp);
-struct file * get_file_fd(int fd);
+struct file * get_file_by_fd(int fd);
+struct file * file_close_pop(int fd);
 #endif /* threads/thread.h */
